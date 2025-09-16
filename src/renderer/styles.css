@@ -1,0 +1,119 @@
+html, body {
+	height: 100%;
+	margin: 0;
+	background: #0f1115;
+	color: #e5e7eb;
+	font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, "Helvetica Neue", Arial;
+}
+
+.app {
+	display: grid;
+	grid-template-columns: 280px 1fr;
+	grid-template-rows: 1fr;
+	height: 100vh;
+}
+
+.sidebar {
+	background: #111318;
+	border-right: 1px solid #1f2330;
+	display: flex;
+	flex-direction: column;
+}
+
+.sidebar-header {
+	padding: 10px;
+	border-bottom: 1px solid #1f2330;
+}
+
+.file-tree {
+	flex: 1;
+	overflow: auto;
+	padding: 8px 6px;
+	font-size: 13px;
+}
+
+.file-tree .item {
+	padding: 4px 6px;
+	border-radius: 6px;
+	cursor: pointer;
+}
+.file-tree .item:hover {
+	background: #1a1d26;
+}
+.file-tree .children { margin-left: 14px; }
+
+.main {
+	display: grid;
+	grid-template-rows: 40px 1fr 24px;
+}
+
+.topbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 40px;
+	padding: 0 8px;
+	border-bottom: 1px solid #1f2330;
+	background: #0f1115;
+}
+
+.tabs {
+	display: flex;
+	gap: 6px;
+	align-items: stretch;
+	overflow: auto;
+}
+.tab {
+	background: #151822;
+	border: 1px solid #242a3a;
+	border-bottom: none;
+	padding: 0 6px;
+	border-top-left-radius: 8px;
+	border-top-right-radius: 8px;
+	font-size: 13px;
+	color: #cbd5e1;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 28px;
+}
+.tab .title { padding: 0 2px; }
+.tab .close {
+	width: 18px;
+	height: 18px;
+	border-radius: 4px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	color: #94a3b8;
+	cursor: pointer;
+}
+.tab .close:hover { background: #242a3a; color: #e2e8f0; }
+.tab.active { background: #1a1f2d; color: #fff; border-color: #2f3850; }
+
+.actions button {
+	background: #1a1f2d;
+	color: #e5e7eb;
+	border: 1px solid #2a3144;
+	padding: 6px 10px;
+	border-radius: 6px;
+	cursor: pointer;
+}
+.actions button:hover { background: #22283a; }
+
+#editor {
+	position: relative;
+	height: calc(100vh - 40px - 24px);
+}
+
+.statusbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 24px;
+	padding: 0 10px;
+	border-top: 1px solid #1f2330;
+	background: #0f1115;
+	font-size: 12px;
+	color: #9aa4b2;
+} 

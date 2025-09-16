@@ -1,0 +1,67 @@
+# Node modules
+node_modules/
+bower_components/
+
+# Build output
+dist/
+out/
+build/
+release/
+
+# Electron specific
+*.asar
+*.asar.unpacked/
+electron-builder.yml
+!.electron-builder.config.js
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+Desktop.ini
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.iml
+
+# Env files
+.env
+.env.*.local
+
+# Cache
+.cache/
+.nyc_output/
+coverage/
+*.tsbuildinfo
+*.tgz
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional stylelint cache
+.stylelintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Optional package lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
