@@ -9,29 +9,131 @@
 		<script src="../../node_modules/monaco-editor/min/vs/loader.js"></script>
 	</head>
 	<body>
-		<div class="app">
-			<aside class="sidebar">
-				<div class="sidebar-header">
-					<button id="openFolderBtn" title="Open Folder">Open Folder</button>
+		<div class="window gradient-bg">
+			<div class="titlebar" style="-webkit-app-region: drag;">
+				<div class="title">Barge</div>
+				<div class="window-controls" style="-webkit-app-region: no-drag;">
+					<button id="winMin">—</button>
+					<button id="winMax">▢</button>
+					<button id="winClose">×</button>
 				</div>
-				<div id="fileTree" class="file-tree"></div>
-			</aside>
-			<main class="main">
-				<header class="topbar">
-					<div class="tabs" id="tabs"></div>
-					<div class="actions">
-						<button id="openBtn">Open</button>
-						<button id="saveBtn">Save As</button>
-						<span id="filename"></span>
+			</div>
+			<nav class="menubar" id="menubar" style="-webkit-app-region: no-drag;">
+				<div class="menu" data-menu="file">
+					<span class="menu-label">File</span>
+					<div class="dropdown">
+						<button class="menu-item" id="mFileOpen"><span>Open…</span><kbd>Ctrl+O</kbd></button>
+						<button class="menu-item" id="mFileOpenFolder"><span>Open Folder…</span><kbd>Ctrl+K Ctrl+O</kbd></button>
+						<button class="menu-item" id="mFileSave"><span>Save</span><kbd>Ctrl+S</kbd></button>
+						<div class="menu-sep"></div>
+						<button class="menu-item" id="mFileExit"><span>Exit</span></button>
 					</div>
-				</header>
-				<div id="editor"></div>
-				<footer class="statusbar">
-					<span id="cursorPos">Ln 1, Col 1</span>
-					<span id="lang">plaintext</span>
-				</footer>
-			</main>
+				</div>
+				<div class="menu" data-menu="edit">
+					<span class="menu-label">Edit</span>
+					<div class="dropdown">
+						<button class="menu-item" id="mEditUndo"><span>Undo</span><kbd>Ctrl+Z</kbd></button>
+						<button class="menu-item" id="mEditRedo"><span>Redo</span><kbd>Ctrl+Y</kbd></button>
+						<div class="menu-sep"></div>
+						<button class="menu-item" id="mEditFind"><span>Find</span><kbd>Ctrl+F</kbd></button>
+						<button class="menu-item" id="mEditFindInFiles"><span>Find in Files</span><kbd>Ctrl+Shift+F</kbd></button>
+						<button class="menu-item" id="mEditPreferences"><span>Preferences…</span><kbd>Ctrl+,</kbd></button>
+					</div>
+				</div>
+				<div class="menu" data-menu="view">
+					<span class="menu-label">View</span>
+					<div class="dropdown">
+						<div class="menu-item" style="pointer-events:none; opacity:.8;">Theme</div>
+						<button class="menu-item" id="mThemeDark"><span>Dark</span></button>
+						<button class="menu-item" id="mThemeLight"><span>Light</span></button>
+						<div class="menu-sep"></div>
+						<button class="menu-item" id="mViewToggleStatus"><span>Toggle Status Bar</span></button>
+					</div>
+				</div>
+				<div class="menu" data-menu="help">
+					<span class="menu-label">Help</span>
+					<div class="dropdown">
+						<button class="menu-item" id="mHelpAbout"><span>About</span></button>
+					</div>
+				</div>
+			</nav>
+			<div class="app">
+				<aside class="sidebar">
+					<div id="fileTree" class="file-tree"></div>
+					<div id="searchPanel" class="search-panel hidden">
+						<div class="search-header">Find in Files</div>
+						<div class="search-controls">
+							<input id="searchQuery" placeholder="Search query" />
+							<label><input id="searchCase" type="checkbox" /> Case sensitive</label>
+							<label><input id="searchRegex" type="checkbox" /> Regex</label>
+							<button id="searchRun">Search</button>
+						</div>
+						<div id="searchResults" class="search-results"></div>
+					</div>
+				</aside>
+				<main class="main">
+					<header class="topbar">
+						<div class="tabs" id="tabs"></div>
+						<div class="actions">
+							<span id="filename"></span>
+						</div>
+					</header>
+					<div id="editor"></div>
+					<footer class="statusbar">
+						<span id="cursorPos">Ln 1, Col 1</span>
+						<span id="lang">plaintext</span>
+					</footer>
+				</main>
+			</div>
 		</div>
-		<script src="renderer.js"></script>
-	</body>
-</html> 
+		<div id="prefsModal" class="modal hidden">
+			<div class="modal-backdrop"></div>
+			<div class="modal-card">
+				<div class="modal-header">
+					<h3>Preferences</h3>
+				</div>
+				<div class="modal-body">
+					<label class="field">
+						<span>Editor font family</span>
+						<input id="prefFontFamily" type="text" placeholder="e.g. JetBrains Mono, Fira Code, monospace" />
+					</label>
+					<label class="field">
+						<span>Editor font size</span>
+						<input id="prefFontSize" type="number" min="8" max="48" step="1" />
+					</label>
+					<label class="field">
+						<span>Auto save</span>
+						<select id="prefAutoSave">
+							<option value="off">Off</option>
+							<option value="afterDelay">After Delay</option>
+							<option value="onFocusChange">On Focus Change</option>
+						</select>
+					</label>
+					<label class="field" id="autoSaveDelayField">
+						<span>Auto save delay (ms)</span>
+						<input id="prefAutoSaveDelay" type="number" min="100" max="10000" step="100" />
+					</label>
+				</div>
+				<div class="modal-footer">
+					<button id="prefsCancel">Cancel</button>
+					<button id="prefsSave">Save</button>
+				</div>
+			</div>
+		</div>
+		<!-- Command Palette -->
+		<div id="cmdPalette" class="modal hidden">
+			<div id="cmdBackdrop" class="modal-backdrop"></div>
+			<div id="cmdCard" class="modal-card cmd-card">
+				<div class="cmd-input-wrap input-group">
+					<span class="input-icon" aria-hidden="true">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+					</span>
+					<input id="cmdInput" type="text" placeholder="Run a command… (e.g. Open File, Toggle Theme)" autocomplete="off" />
+				</div>
+				<div id="cmdList" class="cmd-list"></div>
+				<div id="cmdEmpty" class="cmd-empty hidden">No matches. Try different keywords.</div>
+			</div>
+		</div>
+ 		<script src="renderer.js"></script>
+ 	</body>
+ </html>

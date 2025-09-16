@@ -25,21 +25,19 @@ contextBridge.exposeInMainWorld('bridge', {
 	openFile: async () => ipcRenderer.invoke('dialog:openFile'),
 	openFolder: async () => ipcRenderer.invoke('dialog:openFolder'),
 	readFileByPath: async (p) => ipcRenderer.invoke('file:readByPath', p),
+	writeFileByPath: async (payload) => ipcRenderer.invoke('file:writeByPath', payload),
 	saveAs: async (content) => ipcRenderer.invoke('file:saveAs', content),
+	searchInFolder: async (payload) => ipcRenderer.invoke('search:inFolder', payload),
 	listExtensions: async () => ipcRenderer.invoke('extensions:list'),
 	registerCommand: (id, fn) => { commands.set(id, fn); },
 	executeCommand: async (id, ...args) => { const fn = commands.get(id); if (fn) return await fn(...args); },
-	onFileOpened: (callback) => {
-		fileOpenedListeners.add(callback);
-		return () => fileOpenedListeners.delete(callback);
+	window: {
+		minimize: () => ipcRenderer.invoke('window:minimize'),
+		maximizeToggle: () => ipcRenderer.invoke('window:maximizeToggle'),
+		close: () => ipcRenderer.invoke('window:close'),
 	},
-	onFileSaved: (callback) => {
-		fileSavedListeners.add(callback);
-		return () => fileSavedListeners.delete(callback);
-	},
-	onFolderOpened: (callback) => {
-		folderOpenedListeners.add(callback);
-		return () => folderOpenedListeners.delete(callback);
-	},
+	onFileOpened: (callback) => { fileOpenedListeners.add(callback); return () => fileOpenedListeners.delete(callback); },
+	onFileSaved: (callback) => { fileSavedListeners.add(callback); return () => fileSavedListeners.delete(callback); },
+	onFolderOpened: (callback) => { folderOpenedListeners.add(callback); return () => folderOpenedListeners.delete(callback); },
 	getLastOpened: () => lastOpenedPayload,
 }); 
