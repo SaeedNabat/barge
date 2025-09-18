@@ -2,8 +2,27 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
+import { pathToFileURL } from 'node:url';
+import pty from 'node-pty-prebuilt-multiarch';
 
 let mainWindow = null;
+const terminals = new Map();
+let nextTermId = 1;
+
+async function safeReadText(filePath) {
+	try {
+		// Try UTF-8 first
+		return await fs.readFile(filePath, 'utf8');
+	} catch (e) {
+		try {
+			// Fallback to latin1 for files not encoded in UTF-8
+			const buf = await fs.readFile(filePath);
+			return buf.toString('latin1');
+		} catch (e2) {
+			throw e2;
+		}
+	}
+}
 
 async function createWindow() {
 	mainWindow = new BrowserWindow({
@@ -13,7 +32,7 @@ async function createWindow() {
 		titleBarStyle: 'hidden',
 		backgroundColor: '#0f1115',
 		webPreferences: {
-			preload: path.join(process.cwd(), 'src', 'preload.js'),
+			preload: path.join(process.cwd(), 'src', 'preload.cjs'),
 			contextIsolation: true,
 			nodeIntegration: false,
 			sandbox: false,
@@ -50,14 +69,11 @@ async function openFile() {
 	const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
 		title: 'Open File',
 		properties: ['openFile'],
-		filters: [
-			{ name: 'All Files', extensions: ['*'] },
-		],
+		filters: [ { name: 'All Files', extensions: ['*'] } ],
 	});
 	if (canceled || filePaths.length === 0) return;
 	const filePath = filePaths[0];
-	const content = await fs.readFile(filePath, 'utf8');
-	console.log('[main] sending file-opened', filePath);
+	const content = await safeReadText(filePath);
 	mainWindow.webContents.send('file-opened', { filePath, content });
 }
 
@@ -69,7 +85,6 @@ async function openFolder() {
 	if (canceled || filePaths.length === 0) return;
 	const root = filePaths[0];
 	const tree = await readDirTree(root);
-	console.log('[main] sending folder-opened', root);
 	mainWindow.webContents.send('folder-opened', { root, tree });
 }
 
@@ -77,13 +92,9 @@ async function readDirTree(dir) {
 	const entries = await fs.readdir(dir, { withFileTypes: true });
 	const items = await Promise.all(entries.map(async (ent) => {
 		const fullPath = path.join(dir, ent.name);
-		if (ent.isDirectory()) {
-			return { type: 'dir', name: ent.name, path: fullPath, children: await readDirTree(fullPath) };
-		} else if (ent.isFile()) {
-			return { type: 'file', name: ent.name, path: fullPath };
-		} else {
-			return null;
-		}
+		if (ent.isDirectory()) return { type: 'dir', name: ent.name, path: fullPath, children: await readDirTree(fullPath) };
+		if (ent.isFile()) return { type: 'file', name: ent.name, path: fullPath };
+		return null;
 	}));
 	return items.filter(Boolean).sort((a, b) => {
 		if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
@@ -91,39 +102,35 @@ async function readDirTree(dir) {
 	});
 }
 
-async function saveFile() {
-	const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-		title: 'Save File',
-		filters: [
-			{ name: 'All Files', extensions: ['*'] },
-		],
-	});
-	if (canceled || !filePath) return;
-	const content = await mainWindow.webContents.executeJavaScript('window.__EDITOR_GET_VALUE__()');
-	await fs.writeFile(filePath, content, 'utf8');
-	console.log('[main] sending file-saved', filePath);
-	mainWindow.webContents.send('file-saved', { filePath });
-}
-
 ipcMain.handle('dialog:openFile', async () => {
-	const { canceled, filePaths } = await dialog.showOpenDialog({ properties: ['openFile'] });
-	if (canceled || filePaths.length === 0) return null;
-	const filePath = filePaths[0];
-	const content = await fs.readFile(filePath, 'utf8');
-	return { filePath, content };
+	try {
+		const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { properties: ['openFile'] });
+		if (canceled || filePaths.length === 0) return null;
+		const filePath = filePaths[0];
+		const content = await safeReadText(filePath);
+		return { filePath, content };
+	} catch (e) {
+		dialog.showErrorBox('Open File Failed', String(e));
+		return null;
+	}
 });
 
 ipcMain.handle('dialog:openFolder', async () => {
-	const { canceled, filePaths } = await dialog.showOpenDialog({ properties: ['openDirectory'] });
-	if (canceled || filePaths.length === 0) return null;
-	const root = filePaths[0];
-	const tree = await readDirTree(root);
-	return { root, tree };
+	try {
+		const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+		if (canceled || filePaths.length === 0) return null;
+		const root = filePaths[0];
+		const tree = await readDirTree(root);
+		return { root, tree };
+	} catch (e) {
+		dialog.showErrorBox('Open Folder Failed', String(e));
+		return null;
+	}
 });
 
 ipcMain.handle('file:readByPath', async (_evt, filePath) => {
 	try {
-		const content = await fs.readFile(filePath, 'utf8');
+		const content = await safeReadText(filePath);
 		return { filePath, content };
 	} catch (e) {
 		console.error('readByPath failed', e);
@@ -153,10 +160,8 @@ ipcMain.handle('extensions:list', async () => {
 	}
 });
 
-import { pathToFileURL } from 'node:url';
-
 ipcMain.handle('file:saveAs', async (_evt, content) => {
-	const { canceled, filePath } = await dialog.showSaveDialog({});
+	const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {});
 	if (canceled || !filePath) return null;
 	await fs.writeFile(filePath, content, 'utf8');
 	return { filePath };
@@ -216,4 +221,148 @@ ipcMain.handle('search:inFolder', async (_evt, { root, query, caseSensitive = fa
 	}
 	await walk(root);
 	return results;
+});
+
+ipcMain.handle('terminal:create', (_evt, cols, rows, cwd) => {
+	const shell = process.env.SHELL || '/bin/bash';
+	const term = pty.spawn(shell, [], {
+		name: 'xterm-color',
+		cols: cols || 80,
+		rows: rows || 24,
+		cwd: cwd || process.cwd(),
+		env: process.env,
+	});
+	const id = String(nextTermId++);
+	terminals.set(id, term);
+	term.onData(data => {
+		mainWindow?.webContents.send('terminal:data', { id, data });
+	});
+	term.onExit(() => {
+		terminals.delete(id);
+		mainWindow?.webContents.send('terminal:exit', { id });
+	});
+	return { id };
+});
+
+ipcMain.handle('terminal:write', (_evt, { id, data }) => {
+	const term = terminals.get(id);
+	if (term) term.write(data);
+});
+
+ipcMain.handle('terminal:resize', (_evt, { id, cols, rows }) => {
+	const term = terminals.get(id);
+	if (term) term.resize(cols, rows);
+});
+
+ipcMain.handle('terminal:dispose', (_evt, { id }) => {
+	const term = terminals.get(id);
+	if (term) try { term.kill(); } catch {}
+	terminals.delete(id);
+});
+
+ipcMain.handle('fs:createFolder', async (_evt, { root, name }) => {
+	try {
+		if (!root || !name) return { ok: false, error: 'Missing root or name' };
+		const sanitized = String(name).trim();
+		if (!sanitized) return { ok: false, error: 'Empty name' };
+		if (/[\\/:*?"<>|]/.test(sanitized)) return { ok: false, error: 'Invalid characters in name' };
+		const newPath = path.join(root, sanitized);
+		try {
+			const st = await fs.stat(newPath);
+			if (st && st.isDirectory()) return { ok: false, error: 'Folder already exists' };
+			return { ok: false, error: 'A file with that name already exists' };
+		} catch {}
+		await fs.mkdir(newPath, { recursive: false });
+		mainWindow?.webContents.send('fs:changed', { kind: 'mkdir', path: newPath });
+		return { ok: true, path: newPath };
+	} catch (e) {
+		return { ok: false, error: String(e) };
+	}
+});
+
+ipcMain.handle('folder:readTree', async (_evt, { root }) => {
+	try {
+		if (!root) return { ok: false, error: 'Missing root' };
+		const tree = await readDirTree(root);
+		return { ok: true, root, tree };
+	} catch (e) {
+		return { ok: false, error: String(e) };
+	}
+});
+
+ipcMain.handle('fs:createFile', async (_evt, { dir, name }) => {
+	try {
+		if (!dir || !name) return { ok: false, error: 'Missing dir or name' };
+		const filePath = path.join(dir, name);
+		await fs.mkdir(dir, { recursive: true });
+		await fs.writeFile(filePath, '', { flag: 'wx' });
+		mainWindow?.webContents.send('fs:changed', { kind: 'create', path: filePath });
+		return { ok: true, path: filePath };
+	} catch (e) {
+		return { ok: false, error: String(e) };
+	}
+});
+
+ipcMain.handle('fs:renamePath', async (_evt, { oldPath, newName }) => {
+	try {
+		if (!oldPath || !newName) return { ok: false, error: 'Missing oldPath or newName' };
+		const dir = path.dirname(oldPath);
+		const sanitized = String(newName).trim();
+		if (!sanitized) return { ok: false, error: 'Empty name' };
+		if (/[\\/:*?"<>|]/.test(sanitized)) return { ok: false, error: 'Invalid characters in name' };
+		const newPath = path.join(dir, sanitized);
+		if (newPath === oldPath) return { ok: true, path: newPath };
+		try {
+			await fs.access(newPath);
+			return { ok: false, error: 'Target already exists' };
+		} catch {}
+		await fs.rename(oldPath, newPath);
+		mainWindow?.webContents.send('fs:changed', { kind: 'rename', path: newPath, oldPath });
+		return { ok: true, path: newPath };
+	} catch (e) {
+		return { ok: false, error: String(e) };
+	}
+});
+
+ipcMain.handle('fs:movePath', async (_evt, { sourcePath, targetDir, newName }) => {
+	try {
+		if (!sourcePath || !targetDir) return { ok: false, error: 'Missing sourcePath or targetDir' };
+		const baseName = newName && String(newName).trim() ? newName.trim() : path.basename(sourcePath);
+		if (/[\\/:*?"<>|]/.test(baseName)) return { ok: false, error: 'Invalid characters in name' };
+		await fs.mkdir(targetDir, { recursive: true });
+		const destPath = path.join(targetDir, baseName);
+		if (destPath === sourcePath) return { ok: true, path: destPath };
+		try { await fs.access(destPath); return { ok: false, error: 'Target already exists' }; } catch {}
+		await fs.rename(sourcePath, destPath);
+		mainWindow?.webContents.send('fs:changed', { kind: 'move', path: destPath, oldPath: sourcePath });
+		return { ok: true, path: destPath };
+	} catch (e) {
+		return { ok: false, error: String(e) };
+	}
+});
+
+async function rmrf(target) {
+	try {
+		const stat = await fs.lstat(target);
+		if (stat.isDirectory()) {
+			const entries = await fs.readdir(target);
+			for (const ent of entries) await rmrf(path.join(target, ent));
+			await fs.rmdir(target);
+		} else {
+			await fs.unlink(target);
+		}
+	} catch (e) {
+		throw e;
+	}
+}
+
+ipcMain.handle('fs:deletePath', async (_evt, { target }) => {
+	try {
+		if (!target) return { ok: false, error: 'Missing target' };
+		await rmrf(target);
+		mainWindow?.webContents.send('fs:changed', { kind: 'delete', path: target });
+		return { ok: true };
+	} catch (e) {
+		return { ok: false, error: String(e) };
+	}
 }); 

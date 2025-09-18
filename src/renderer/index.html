@@ -2,10 +2,11 @@
 <html>
 	<head>
 		<meta charset="utf-8" />
-		<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline';" />
+		<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; connect-src 'self' data: blob:; img-src 'self' data: blob:; font-src 'self' data:;" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>Barge Editor</title>
 		<link rel="stylesheet" href="styles.css" />
+		<link rel="stylesheet" href="../../node_modules/xterm/css/xterm.css" />
 		<script src="../../node_modules/monaco-editor/min/vs/loader.js"></script>
 	</head>
 	<body>
@@ -13,18 +14,26 @@
 			<div class="titlebar" style="-webkit-app-region: drag;">
 				<div class="title">Barge</div>
 				<div class="window-controls" style="-webkit-app-region: no-drag;">
-					<button id="winMin">—</button>
-					<button id="winMax">▢</button>
-					<button id="winClose">×</button>
+					<button id="winMin" title="Minimize" aria-label="Minimize">
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"><path d="M5 19h14"/></svg>
+					</button>
+					<button id="winMax" title="Maximize" aria-label="Maximize">
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+					</button>
+					<button id="winClose" title="Close" aria-label="Close">
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+					</button>
 				</div>
 			</div>
 			<nav class="menubar" id="menubar" style="-webkit-app-region: no-drag;">
 				<div class="menu" data-menu="file">
 					<span class="menu-label">File</span>
 					<div class="dropdown">
+						<button class="menu-item" id="mFileNew"><span>New File</span><kbd>Ctrl+N</kbd></button>
 						<button class="menu-item" id="mFileOpen"><span>Open…</span><kbd>Ctrl+O</kbd></button>
 						<button class="menu-item" id="mFileOpenFolder"><span>Open Folder…</span><kbd>Ctrl+K Ctrl+O</kbd></button>
 						<button class="menu-item" id="mFileSave"><span>Save</span><kbd>Ctrl+S</kbd></button>
+						<button class="menu-item" id="mFileSaveAs"><span>Save As…</span><kbd>Ctrl+Shift+S</kbd></button>
 						<div class="menu-sep"></div>
 						<button class="menu-item" id="mFileExit"><span>Exit</span></button>
 					</div>
@@ -48,6 +57,7 @@
 						<button class="menu-item" id="mThemeLight"><span>Light</span></button>
 						<div class="menu-sep"></div>
 						<button class="menu-item" id="mViewToggleStatus"><span>Toggle Status Bar</span></button>
+						<button class="menu-item" id="mViewToggleTerminal"><span>Toggle Terminal</span><kbd>Ctrl+`</kbd></button>
 					</div>
 				</div>
 				<div class="menu" data-menu="help">
@@ -59,6 +69,22 @@
 			</nav>
 			<div class="app">
 				<aside class="sidebar">
+					<div class="sidebar-toolbar">
+						<button id="sidebarNewFile" title="New File" class="icon-btn accent" aria-label="New File">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" opacity=".6"/>
+								<path d="M14 2v7h7" opacity=".6"/>
+								<path d="M12 11v6M9 14h6"/>
+								<path d="M6 6l1.5-.5M18 6l-1.5-.5M12 4l0-1" stroke="#93c5fd" stroke-width="1.5"/>
+							</svg>
+						</button>
+						<button id="sidebarNewFolder" title="New Folder" class="icon-btn" aria-label="New Folder">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M3 7h5l2 2h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+								<path d="M12 13v6M9 16h6"/>
+							</svg>
+						</button>
+					</div>
 					<div id="fileTree" class="file-tree"></div>
 					<div id="searchPanel" class="search-panel hidden">
 						<div class="search-header">Find in Files</div>
@@ -79,6 +105,9 @@
 						</div>
 					</header>
 					<div id="editor"></div>
+					<div id="terminalPanel" class="terminal hidden">
+						<div id="terminal" class="xterm"></div>
+					</div>
 					<footer class="statusbar">
 						<span id="cursorPos">Ln 1, Col 1</span>
 						<span id="lang">plaintext</span>
@@ -86,6 +115,7 @@
 				</main>
 			</div>
 		</div>
+		<!-- modals below -->
 		<div id="prefsModal" class="modal hidden">
 			<div class="modal-backdrop"></div>
 			<div class="modal-card">
@@ -115,8 +145,42 @@
 					</label>
 				</div>
 				<div class="modal-footer">
-					<button id="prefsCancel">Cancel</button>
-					<button id="prefsSave">Save</button>
+					<button id="prefsCancel" class="btn btn-ghost">Cancel</button>
+					<button id="prefsSave" class="btn btn-primary">Save</button>
+				</div>
+			</div>
+		</div>
+		<div id="emptyStateModal" class="modal hidden">
+			<div class="modal-backdrop"></div>
+			<div class="modal-card">
+				<div class="modal-header"><h3>Welcome to Barge</h3></div>
+				<div class="modal-body">
+					<p style="margin:0 0 8px; color:#9aa4b2;">Open a file or a folder to get started.</p>
+					<div style="display:flex; gap:8px;">
+						<button id="emptyOpenFile" class="btn btn-primary">Open File</button>
+						<button id="emptyOpenFolder" class="btn">Open Folder</button>
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button id="emptyClose" class="btn btn-ghost">Close</button>
+				</div>
+			</div>
+		</div>
+		<!-- Input Modal -->
+		<div id="inputModal" class="modal hidden">
+			<div class="modal-backdrop"></div>
+			<div class="modal-card">
+				<div class="modal-header"><h3 id="inputTitle">Enter Name</h3></div>
+				<div class="modal-body">
+					<label class="field">
+						<span id="inputLabel">Name</span>
+						<input id="inputField" type="text" autocomplete="off" />
+					</label>
+					<div id="inputError" style="color:#fca5a5; font-size:12px; display:none;"></div>
+				</div>
+				<div class="modal-footer">
+					<button id="inputCancel" class="btn btn-ghost">Cancel</button>
+					<button id="inputOk" class="btn btn-primary">Create</button>
 				</div>
 			</div>
 		</div>
@@ -134,6 +198,8 @@
 				<div id="cmdEmpty" class="cmd-empty hidden">No matches. Try different keywords.</div>
 			</div>
 		</div>
- 		<script src="renderer.js"></script>
- 	</body>
- </html>
+		<!-- Load xterm browser bundle so Terminal is global -->
+		<script src="../../node_modules/xterm/lib/xterm.js"></script>
+		<script src="renderer.js"></script>
+	</body>
+</html>

@@ -108,13 +108,10 @@ async function showInputModal({ title, label, placeholder, okText = 'Create', va
 }
 
 async function refreshTree() {
-	// Capture current tree state (expanded dirs and selection)
-	const state = collectTreeState();
 	const updated = await window.bridge.readFolderTree(currentWorkspaceRoot);
 	if (updated?.ok) {
 		currentWorkspaceRoot = updated.root;
 		if (window.bargeRenderTree) window.bargeRenderTree(updated.root, updated.tree);
-		else renderTree(updated.root, updated.tree, state);
 		updateEmptyState();
 	}
 }
@@ -122,23 +119,6 @@ async function refreshTree() {
 function scheduleRefreshTree() {
 	clearTimeout(refreshTimer);
 	refreshTimer = setTimeout(() => { refreshTree(); }, 100);
-}
-
-function collectTreeState() {
-	const fileTreeEl = document.getElementById('fileTree');
-	const expandedPaths = new Set();
-	let selectedPath = null;
-	if (fileTreeEl) {
-		fileTreeEl.querySelectorAll('.item').forEach((item) => {
-			const path = item.dataset?.path;
-			const children = item.nextSibling;
-			if (path && children && children.classList && children.classList.contains('children') && children.style.display === 'block') {
-				expandedPaths.add(path);
-			}
-			if (item.classList.contains('selected')) selectedPath = path || selectedPath;
-		});
-	}
-	return { expandedPaths, selectedPath };
 }
 
 function createUntitled() {
@@ -382,11 +362,11 @@ window.addEventListener('DOMContentLoaded', () => {
 
 	safeBind(mFileOpen, 'click', openFileFlow);
 	safeBind(mFileOpenFolder, 'click', openFolderFlow);
-safeBind(mFileSave, 'click', async () => { if (editor) await saveActiveFile(); });
-safeBind(mFileSaveAs, 'click', async () => { if (!editor) return; const content = editor.getModel()?.getValue(); const res = await window.bridge.saveAs(content); if (res?.filePath) { const old = activeTabPath; activeTabPath = res.filePath; const model = modelsByPath.get(old); if (model) { modelsByPath.delete(old); const newModel = monacoRef.editor.createModel(content ?? '', guessLanguage(res.filePath), monacoRef.Uri.file(res.filePath)); modelsByPath.set(res.filePath, newModel); editor.setModel(newModel); } const tab = openTabs.find(t => t.path === old); if (tab) { tab.path = res.filePath; tab.title = basename(res.filePath); tab._titleEl.textContent = tab.title; } updateEmptyState(); } });
-safeBind(mFileNew, 'click', () => { hideAnyModal(); if (monacoRef) createUntitled(); else { window.addEventListener('barge:monaco-ready', () => createUntitled(), { once: true }); } });
-// removed early newFileBtn binding to allow folder-aware handler later
-safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
+	safeBind(mFileSave, 'click', async () => { if (editor) await saveActiveFile(); });
+	safeBind(mFileSaveAs, 'click', async () => { if (!editor) return; const content = editor.getModel()?.getValue(); const res = await window.bridge.saveAs(content); if (res?.filePath) { const old = activeTabPath; activeTabPath = res.filePath; const model = modelsByPath.get(old); if (model) { modelsByPath.delete(old); const newModel = monacoRef.editor.createModel(content ?? '', guessLanguage(res.filePath), monacoRef.Uri.file(res.filePath)); modelsByPath.set(res.filePath, newModel); editor.setModel(newModel); } const tab = openTabs.find(t => t.path === old); if (tab) { tab.path = res.filePath; tab.title = basename(res.filePath); tab._titleEl.textContent = tab.title; } updateEmptyState(); } });
+	safeBind(mFileNew, 'click', () => { hideAnyModal(); if (monacoRef) createUntitled(); else { window.addEventListener('barge:monaco-ready', () => createUntitled(), { once: true }); } });
+	safeBind(newFileBtn, 'click', () => { hideAnyModal(); if (monacoRef) createUntitled(); else { window.addEventListener('barge:monaco-ready', () => createUntitled(), { once: true }); } });
+	safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 
 	// Basic menu bindings
 	safeBind(mEditPreferences, 'click', () => { if (typeof openPrefs === 'function') openPrefs(); else setTimeout(() => openPrefs?.(), 100); });
@@ -588,25 +568,17 @@ if (!window.__MONACO_BOOT__) {
 
 		loadExtensions();
 
-		function renderTree(root, tree, state) {
+		function renderTree(root, tree) {
 			const fileTreeEl = document.getElementById('fileTree');
 			fileTreeEl.innerHTML = '';
 			const rootEl = document.createElement('div'); rootEl.className = 'item'; rootEl.textContent = root; fileTreeEl.appendChild(rootEl);
 			rootEl.addEventListener('click', () => { selectedDirectoryPath = root; highlightSelectedDir(rootEl); });
 			const children = document.createElement('div'); children.className = 'children'; fileTreeEl.appendChild(children);
-			for (const node of tree) children.appendChild(renderNode(node, state));
-			// Expand root if previously expanded or by default when no state
-			const shouldExpandRoot = !state || !state.expandedPaths || state.expandedPaths.has(root) || state.expandedPaths.size === 0;
-			children.style.display = shouldExpandRoot ? 'block' : 'none';
-			// Restore selection if available, otherwise select root
-			selectedDirectoryPath = state?.selectedPath || root;
-			highlightSelectedDir(state?.selectedPath ? fileTreeEl.querySelector(`.item[data-path="${CSS.escape(state.selectedPath)}"]`) || rootEl : rootEl);
+			for (const node of tree) children.appendChild(renderNode(node));
 			attachTreeContextMenu(fileTreeEl);
 			enableTreeKeyboard(fileTreeEl);
 			enableTreeDnD(fileTreeEl);
 		}
-		// Expose renderer functions for early callers
-		window.bargeRenderTree = renderTree;
 
 		function enableTreeKeyboard(container) {
 			container.tabIndex = 0;
@@ -657,32 +629,13 @@ if (!window.__MONACO_BOOT__) {
 				e.preventDefault();
 				const target = e.target.closest('.item');
 				if (!target) return;
-				const itemPath = computePathFromItem(target);
-				const isDir = !!(target.nextSibling && target.nextSibling.classList && target.nextSibling.classList.contains('children'));
-				const items = [];
-				if (isDir) {
-					items.push(
-						{ label: 'Open', action: async () => {
-							// toggle expand like click handler
-							const children = target.nextSibling; if (children) { const expanded = children.style.display === 'block'; children.style.display = expanded ? 'none' : 'block'; selectedDirectoryPath = itemPath; highlightSelectedDir(target); }
-						}},
-						{ label: 'New File', action: async () => {
-							hideAnyModal();
-							const name = await showInputModal({ title: 'New File', label: 'File name', placeholder: 'e.g. index.js', okText: 'Create File', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFile({ dir: itemPath, name: val }); if (!res?.ok) return res?.error || 'Failed to create file'; return ''; } });
-							if (!name) return; await refreshTree(); const created = itemPath + '/' + name; const file = await window.bridge.readFileByPath(created); openInTabSafe(created, file?.content ?? '');
-						}},
-						{ label: 'New Folder', action: async () => {
-							hideAnyModal();
-							const name = await showInputModal({ title: 'New Folder', label: 'Folder name', placeholder: 'e.g. src', okText: 'Create Folder', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFolder({ root: itemPath, name: val }); if (!res?.ok) return res?.error || 'Failed to create folder'; return ''; } });
-							if (!name) return; await refreshTree();
-						}}
-					);
-				} else {
-					items.push({ label: 'Open', action: async () => { const res = await window.bridge.readFileByPath(itemPath); openInTabSafe(itemPath, res?.content ?? ''); }});
-				}
-				items.push({ label: 'Rename', action: () => renameFlow(itemPath) });
-				items.push({ label: 'Delete', action: () => deleteFlow(itemPath) });
-				showContextMenu(e.pageX, e.pageY, items);
+				const nameEl = target.querySelector('span');
+				const isDir = !!target.closest('.children') && nameEl; // heuristic; improved below
+				const path = computePathFromItem(target);
+				showContextMenu(e.pageX, e.pageY, [
+					{ label: 'Rename', action: () => renameFlow(path) },
+					{ label: 'Delete', action: () => deleteFlow(path) },
+				]);
 			}, false);
 		}
 
@@ -754,14 +707,13 @@ if (!window.__MONACO_BOOT__) {
 
 		function iconSvg(kind) { if (kind === 'dir') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7h6l2 2h10v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="#8aa2c4"/></svg>'; return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="5" y="3" width="14" height="18" rx="2" ry="2" stroke="#9aa2b2"/></svg>'; }
 
-		function renderNode(node, state) {
+		function renderNode(node) {
 			const el = document.createElement('div'); el.className = 'item'; el.innerHTML = `${iconSvg(node.type)} <span>${node.name}</span>`; el.dataset.path = node.path || ''; el.draggable = true;
 			if (node.type === 'file') { el.addEventListener('click', async () => { const res = await window.bridge.readFileByPath(node.path); openInTabSafe(node.path, res?.content ?? ''); updateEmptyState(); }); }
 			else if (node.type === 'dir') {
-				const children = document.createElement('div'); children.className = 'children';
-				let expanded = !!(state && state.expandedPaths && state.expandedPaths.has(node.path));
+				const children = document.createElement('div'); children.className = 'children'; let expanded = false;
 				el.addEventListener('click', () => { expanded = !expanded; children.style.display = expanded ? 'block' : 'none'; selectedDirectoryPath = node.path; highlightSelectedDir(el); });
-				for (const child of node.children) children.appendChild(renderNode(child, state)); children.style.display = expanded ? 'block' : 'none'; const wrap = document.createElement('div'); wrap.appendChild(el); wrap.appendChild(children); return wrap;
+				for (const child of node.children) children.appendChild(renderNode(child)); children.style.display = 'none'; const wrap = document.createElement('div'); wrap.appendChild(el); wrap.appendChild(children); return wrap;
 			}
 			return el;
 		}
@@ -794,8 +746,6 @@ if (!window.__MONACO_BOOT__) {
 			editor.focus();
 			filenameEl.textContent = filePath; langEl.textContent = guessLanguage(filePath); markDirty(filePath, false); updateStatus();
 		}
-		// Expose tab open API for code that runs before Monaco is ready
-		window.bargeOpenFileInTab = openFileInTab;
 
 		function activateTab(filePath) { activeTabPath = filePath; for (const t of openTabs) t._el.classList.toggle('active', t.path === filePath); const model = modelsByPath.get(filePath); if (model) { editor.setModel(model); editor.focus(); } if (settings.autoSave === 'onFocusChange') saveActiveFile(); }
 
