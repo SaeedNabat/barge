@@ -33,6 +33,7 @@ function openInTabSafe(filePath, content) {
 
 let monacoRef = null; let editor = null; let openTabs = []; let activeTabPath = null;
 const modelsByPath = new Map(); const autosaveTimers = new Map();
+let closedStack = [];
 let currentWorkspaceRoot = null; let isOpeningFile = false; let isOpeningFolder = false;
 let untitledCounter = 1; let termInstance = null; let termId = null; let selectedDirectoryPath = null; let refreshTimer = null;
 
@@ -258,9 +259,14 @@ window.addEventListener('DOMContentLoaded', () => {
 	const mFileOpen = document.getElementById('mFileOpen');
 	const mFileOpenFolder = document.getElementById('mFileOpenFolder');
 	const mFileSave = document.getElementById('mFileSave');
+	const mFileSaveAll = document.getElementById('mFileSaveAll');
 	const mFileSaveAs = document.getElementById('mFileSaveAs');
+	const mFileCloseAll = document.getElementById('mFileCloseAll');
+	const mFileReopenClosed = document.getElementById('mFileReopenClosed');
 	const mFileExit = document.getElementById('mFileExit');
 	const mEditPreferences = document.getElementById('mEditPreferences');
+	const mEditUndo = document.getElementById('mEditUndo');
+	const mEditRedo = document.getElementById('mEditRedo');
 	const mThemeDark = document.getElementById('mThemeDark');
 	const mThemeLight = document.getElementById('mThemeLight');
 	const prefsModal = document.getElementById('prefsModal');
@@ -395,13 +401,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
 	safeBind(mFileOpen, 'click', openFileFlow);
 	safeBind(mFileOpenFolder, 'click', openFolderFlow);
-safeBind(mFileSave, 'click', async () => { if (editor) await saveActiveFile(); });
+	safeBind(mFileSave, 'click', async () => { if (window.__saveActive) { await window.__saveActive(); } else { window.__PENDING_SAVE_ACTIVE__ = true; } });
+	safeBind(mFileSaveAll, 'click', async () => { if (window.__saveAllTabs) { await window.__saveAllTabs(); } else { window.__PENDING_SAVE_ALL__ = true; } });
+	safeBind(mFileCloseAll, 'click', () => { if (window.__closeAllTabs) { window.__closeAllTabs(); } else { window.__PENDING_CLOSE_ALL__ = true; } });
+	safeBind(mFileReopenClosed, 'click', () => { if (window.__reopenClosedTab) { window.__reopenClosedTab(); } else { window.__PENDING_REOPEN_CLOSED__ = true; } });
 safeBind(mFileSaveAs, 'click', async () => { if (!editor) return; const content = editor.getModel()?.getValue(); const res = await window.bridge.saveAs(content); if (res?.filePath) { const old = activeTabPath; activeTabPath = res.filePath; const model = modelsByPath.get(old); if (model) { modelsByPath.delete(old); const newModel = monacoRef.editor.createModel(content ?? '', guessLanguage(res.filePath), monacoRef.Uri.file(res.filePath)); modelsByPath.set(res.filePath, newModel); editor.setModel(newModel); } const tab = openTabs.find(t => t.path === old); if (tab) { tab.path = res.filePath; tab.title = basename(res.filePath); tab._titleEl.textContent = tab.title; } updateEmptyState(); } });
 safeBind(mFileNew, 'click', () => { hideAnyModal(); if (monacoRef) createUntitled(); else { window.addEventListener('barge:monaco-ready', () => createUntitled(), { once: true }); } });
 // removed early newFileBtn binding to allow folder-aware handler later
 safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 
 	// Basic menu bindings
+	safeBind(mEditUndo, 'click', () => { editor?.trigger('menu', 'undo', null); });
+	safeBind(mEditRedo, 'click', () => { editor?.trigger('menu', 'redo', null); });
 	safeBind(mEditPreferences, 'click', () => { if (typeof openPrefs === 'function') openPrefs(); else setTimeout(() => openPrefs?.(), 100); });
 	safeBind(mThemeDark, 'click', () => { settings.theme = 'dark'; saveSettings(); applySettings(); });
 	safeBind(mThemeLight, 'click', () => { settings.theme = 'light'; saveSettings(); applySettings(); });
@@ -435,8 +446,19 @@ safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 
 	safeBind(mEditGoToLine, 'click', async () => {
 		if (!editor) return;
-		const val = await showInputModal({ title: 'Go to Line', label: 'Line number', placeholder: 'e.g. 120', okText: 'Go', validate: (v) => { if (!v || isNaN(Number(v))) return 'Enter a valid number'; return ''; } });
-		if (!val) return; const line = Math.max(1, parseInt(val, 10)); editor.revealLineInCenter(line); editor.setPosition({ lineNumber: line, column: 1 }); editor.focus();
+		const val = await showInputModal({ title: 'Go to Line', label: 'Line number', placeholder: 'e.g. 120 or 120:5', okText: 'Go', validate: (v) => { if (!v) return 'Enter a line'; const m = String(v).trim().match(/^\s*(\d+)(?::(\d+))?\s*$/); if (!m) return 'Use N or N:C'; return ''; } });
+		if (!val) return;
+		const m = String(val).trim().match(/^(\d+)(?::(\d+))?$/);
+		const model = editor.getModel();
+		if (!model) return;
+		let line = parseInt(m[1], 10);
+		let col = m[2] ? parseInt(m[2], 10) : 1;
+		line = Math.max(1, Math.min(model.getLineCount(), line));
+		const maxCol = Math.max(1, model.getLineMaxColumn(line));
+		col = Math.max(1, Math.min(maxCol, col));
+		editor.setSelection({ startLineNumber: line, startColumn: col, endLineNumber: line, endColumn: col });
+		editor.revealLineInCenter(line);
+		editor.focus();
 	});
 
 	safeBind(mViewToggleWordWrap, 'click', () => { settings.wordWrap = settings.wordWrap === 'off' ? 'on' : 'off'; saveSettings(); applySettings(); });
@@ -1004,6 +1026,8 @@ if (!window.__MONACO_BOOT__) {
 			await window.bridge.writeFileByPath({ filePath: activeTabPath, content });
 			markDirty(activeTabPath, false);
 		}
+		// Provide deferred global save for menu binding
+		window.__saveActive = async () => { if (!activeTabPath) { alert('No file to save'); return; } await saveActiveFile(); };
 
 		function handleAutoSave() {
 			if (settings.autoSave === 'afterDelay') {
@@ -1020,7 +1044,7 @@ if (!window.__MONACO_BOOT__) {
 			if (idx === -1) return;
 			const tab = openTabs[idx];
 			if (tab.dirty) { const ok = confirm(`${tab.title} has unsaved changes. Close anyway?`); if (!ok) return; }
-			try { const model = modelsByPath.get(filePath); const content = model?.getValue(); closedStack.push({ path: filePath, content }); } catch {}
+			try { const model = modelsByPath.get(filePath); const content = model?.getValue(); closedStack.push({ path: filePath, content }); if (closedStack.length > 50) closedStack.shift(); } catch {}
 			tab._el.remove(); openTabs.splice(idx, 1);
 			const stillUsed = openTabs.some(t => t.path === filePath);
 			if (!stillUsed) { const model = modelsByPath.get(filePath); if (model) { model.dispose(); modelsByPath.delete(filePath); } }
@@ -1148,6 +1172,61 @@ if (!window.__MONACO_BOOT__) {
 				}
 			}
 		});
+
+		// Defer file menu actions until Monaco is ready
+		window.__saveAllTabs = async () => {
+			for (const t of openTabs) {
+				const model = modelsByPath.get(t.path);
+				if (model) {
+					const content = model.getValue();
+					if (isUntitledPath(t.path)) {
+						const res = await window.bridge.saveAs(content);
+						if (res?.filePath) {
+							const newPath = res.filePath;
+							modelsByPath.delete(t.path);
+							const newModel = monacoRef.editor.createModel(content ?? '', guessLanguage(newPath), monacoRef.Uri.file(newPath));
+							modelsByPath.set(newPath, newModel);
+							editor.setModel(newModel);
+							const tab = openTabs.find(tab => tab.path === t.path);
+							if (tab) { tab.path = newPath; tab.title = basename(newPath); tab._titleEl.textContent = tab.title; }
+							markDirty(newPath, false);
+						}
+					} else {
+						await window.bridge.writeFileByPath({ filePath: t.path, content });
+						markDirty(t.path, false);
+					}
+				}
+			}
+			updateEmptyState();
+		};
+
+		window.__closeAllTabs = () => {
+			const toClose = [...openTabs];
+			for (const t of toClose) {
+				if (t.dirty) { const ok = confirm(`${t.title} has unsaved changes. Close anyway?`); if (!ok) return; }
+				try { const model = modelsByPath.get(t.path); const content = model?.getValue(); closedStack.push({ path: t.path, content }); if (model) { model.dispose(); modelsByPath.delete(t.path); } } catch {}
+				try { t._el?.remove(); } catch {}
+			}
+			openTabs = [];
+			activeTabPath = null;
+			editor.setValue('');
+			filenameEl.textContent = '';
+			updateEmptyState();
+		};
+
+		window.__reopenClosedTab = () => {
+			if (closedStack.length === 0) return;
+			const last = closedStack.pop();
+			openFileInTab(last.path, last.content ?? '');
+			updateEmptyState();
+		};
+		// Flush any pending menu actions registered before editor was ready
+		(async () => {
+			try { if (window.__PENDING_SAVE_ACTIVE__) { delete window.__PENDING_SAVE_ACTIVE__; await window.__saveActive(); } } catch {}
+			try { if (window.__PENDING_SAVE_ALL__) { delete window.__PENDING_SAVE_ALL__; await window.__saveAllTabs(); } } catch {}
+			try { if (window.__PENDING_CLOSE_ALL__) { delete window.__PENDING_CLOSE_ALL__; window.__closeAllTabs(); } } catch {}
+			try { if (window.__PENDING_REOPEN_CLOSED__) { delete window.__PENDING_REOPEN_CLOSED__; window.__reopenClosedTab(); } } catch {}
+		})();
 	});
 }
 
