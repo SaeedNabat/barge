@@ -225,12 +225,15 @@ ipcMain.handle('search:inFolder', async (_evt, { root, query, caseSensitive = fa
 
 ipcMain.handle('terminal:create', (_evt, cols, rows, cwd) => {
 	const shell = process.env.SHELL || '/bin/bash';
-	const term = pty.spawn(shell, [], {
+	const shellName = shell.split('/').pop() || 'sh';
+	const args = (shellName === 'bash' || shellName === 'zsh') ? ['-l', '-i'] : [];
+	const env = { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+	const term = pty.spawn(shell, args, {
 		name: 'xterm-color',
 		cols: cols || 80,
 		rows: rows || 24,
 		cwd: cwd || process.cwd(),
-		env: process.env,
+		env,
 	});
 	const id = String(nextTermId++);
 	terminals.set(id, term);

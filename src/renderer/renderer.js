@@ -2,13 +2,15 @@
 if (!window.__MONACO_CONFIGURED__) {
 	window.__MONACO_CONFIGURED__ = true;
 	if (window.require && window.require.config) {
-		require.config({ paths: { vs: '../../node_modules/monaco-editor/min/vs' } });
+		const monacoBase = new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString();
+		require.config({ paths: { vs: monacoBase + 'vs' } });
 	}
 	// Fix worker loading under file:// with CSP via blob and correct baseUrl
 	window.MonacoEnvironment = {
-		baseUrl: '../../node_modules/monaco-editor/min/',
+		baseUrl: new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString(),
 		getWorkerUrl: function (_moduleId, _label) {
-			const code = `self.MonacoEnvironment = { baseUrl: '../../node_modules/monaco-editor/min/' }; importScripts('../../node_modules/monaco-editor/min/vs/base/worker/workerMain.js');`;
+			const abs = new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString();
+			const code = `self.MonacoEnvironment = { baseUrl: '${abs}' }; importScripts('${abs}vs/base/worker/workerMain.js');`;
 			const blob = new Blob([code], { type: 'text/javascript' });
 			return URL.createObjectURL(blob);
 		}
@@ -162,6 +164,9 @@ const settings = {
 	theme: 'dark',
 	autoSave: 'off', // off | afterDelay | onFocusChange
 	autoSaveDelay: 1000,
+	wordWrap: 'off', // off | on
+	lineNumbers: 'on', // on | off
+	renderWhitespace: 'none', // none | all | selection
 };
 
 function loadSettings() {
@@ -176,6 +181,7 @@ function applySettings() {
 	editor.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize });
 	monacoRef.editor.setTheme(settings.theme === 'light' ? 'vs' : 'barge-dark');
 	document.body.classList.toggle('theme-light', settings.theme === 'light');
+	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace });
 }
 
 function updateEmptyState() {
@@ -369,11 +375,18 @@ window.addEventListener('DOMContentLoaded', () => {
 			{ id: 'file:open', title: 'File: Open…', hint: 'Ctrl+O', run: () => mFileOpen?.click() },
 			{ id: 'file:openFolder', title: 'File: Open Folder…', hint: 'Ctrl+K Ctrl+O', run: () => mFileOpenFolder?.click() },
 			{ id: 'file:save', title: 'File: Save', hint: 'Ctrl+S', run: () => mFileSave?.click() },
+			{ id: 'file:saveAll', title: 'File: Save All', run: () => mFileSaveAll?.click() },
+			{ id: 'file:closeAll', title: 'File: Close All', run: () => mFileCloseAll?.click() },
+			{ id: 'file:reopenClosed', title: 'File: Reopen Closed Tab', run: () => mFileReopenClosed?.click() },
 			{ id: 'file:saveAs', title: 'File: Save As…', hint: 'Ctrl+Shift+S', run: () => mFileSaveAs?.click() },
 			{ id: 'edit:find', title: 'Edit: Find', hint: 'Ctrl+F', run: () => mEditFind?.click() },
 			{ id: 'edit:findInFiles', title: 'Edit: Find in Files', hint: 'Ctrl+Shift+F', run: () => mEditFindInFiles?.click() },
+			{ id: 'edit:goToLine', title: 'Edit: Go to Line…', hint: 'Ctrl+G', run: () => mEditGoToLine?.click() },
 			{ id: 'view:toggleStatusBar', title: 'View: Toggle Status Bar', run: () => { const sb = document.querySelector('.statusbar'); if (sb) sb.style.display = (sb.style.display === 'none' ? '' : 'none'); } },
 			{ id: 'view:toggleTheme', title: 'View: Toggle Theme (Dark/Light)', run: () => { settings.theme = settings.theme === 'light' ? 'dark' : 'light'; saveSettings(); applySettings(); } },
+			{ id: 'view:toggleWordWrap', title: 'View: Toggle Word Wrap', hint: 'Alt+Z', run: () => mViewToggleWordWrap?.click() },
+			{ id: 'view:toggleLineNumbers', title: 'View: Toggle Line Numbers', run: () => mViewToggleLineNumbers?.click() },
+			{ id: 'view:toggleWhitespace', title: 'View: Toggle Render Whitespace', run: () => mViewToggleWhitespace?.click() },
 			{ id: 'editor:toggleMinimap', title: 'Editor: Toggle Minimap', run: () => { if (editor) { const opts = editor.getRawOptions(); editor.updateOptions({ minimap: { enabled: !opts.minimap?.enabled } }); } } },
 		];
 	}
@@ -420,6 +433,21 @@ safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 		}
 	});
 
+	safeBind(mEditGoToLine, 'click', async () => {
+		if (!editor) return;
+		const val = await showInputModal({ title: 'Go to Line', label: 'Line number', placeholder: 'e.g. 120', okText: 'Go', validate: (v) => { if (!v || isNaN(Number(v))) return 'Enter a valid number'; return ''; } });
+		if (!val) return; const line = Math.max(1, parseInt(val, 10)); editor.revealLineInCenter(line); editor.setPosition({ lineNumber: line, column: 1 }); editor.focus();
+	});
+
+	safeBind(mViewToggleWordWrap, 'click', () => { settings.wordWrap = settings.wordWrap === 'off' ? 'on' : 'off'; saveSettings(); applySettings(); });
+	safeBind(mViewToggleLineNumbers, 'click', () => { settings.lineNumbers = settings.lineNumbers === 'on' ? 'off' : 'on'; saveSettings(); applySettings(); });
+	safeBind(mViewToggleWhitespace, 'click', () => {
+		const order = ['none', 'selection', 'all'];
+		const idx = order.indexOf(settings.renderWhitespace);
+		settings.renderWhitespace = order[(idx + 1) % order.length];
+		saveSettings(); applySettings();
+	});
+
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && !cmdPalette.classList.contains('hidden')) { e.preventDefault(); closeCmdPalette(); return; }
 		if (e.ctrlKey && e.key === ',') { e.preventDefault(); openPrefs(); }
@@ -428,6 +456,8 @@ safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 		if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); mFileSave?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); mFileSaveAs?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); mEditFindInFiles?.click(); }
+		if (e.ctrlKey && e.key.toLowerCase() === 'g') { e.preventDefault(); mEditGoToLine?.click(); }
+		if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'z') { e.preventDefault(); mViewToggleWordWrap?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); openCmdPalette(); }
 		if (e.ctrlKey && e.key.toLowerCase() === 'n') { e.preventDefault(); mFileNew?.click(); }
 	});
@@ -455,10 +485,24 @@ safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 	const terminalPanel = document.getElementById('terminalPanel');
 	const terminalEl = document.getElementById('terminal');
 
+	async function ensureXtermLoaded() {
+		if (window.Terminal) return true;
+		// Try to load xterm dynamically if not present
+		return await new Promise((resolve) => {
+			const script = document.createElement('script');
+			script.src = new URL('../../node_modules/xterm/lib/xterm.js', document.baseURI).toString();
+			script.onload = () => resolve(true);
+			script.onerror = () => resolve(false);
+			document.head.appendChild(script);
+		});
+	}
+
 	safeBind(mViewToggleTerminal, 'click', async () => {
 		terminalPanel?.classList.toggle('hidden');
 		if (!terminalPanel?.classList.contains('hidden')) {
-			await ensureTerminal();
+			const ok = await ensureXtermLoaded();
+			if (ok) await ensureTerminal();
+			termInstance?.focus();
 		}
 	});
 
@@ -976,6 +1020,7 @@ if (!window.__MONACO_BOOT__) {
 			if (idx === -1) return;
 			const tab = openTabs[idx];
 			if (tab.dirty) { const ok = confirm(`${tab.title} has unsaved changes. Close anyway?`); if (!ok) return; }
+			try { const model = modelsByPath.get(filePath); const content = model?.getValue(); closedStack.push({ path: filePath, content }); } catch {}
 			tab._el.remove(); openTabs.splice(idx, 1);
 			const stillUsed = openTabs.some(t => t.path === filePath);
 			if (!stillUsed) { const model = modelsByPath.get(filePath); if (model) { model.dispose(); modelsByPath.delete(filePath); } }
@@ -1108,17 +1153,34 @@ if (!window.__MONACO_BOOT__) {
 
 async function ensureTerminal() {
 	if (!termInstance) {
-		// Terminal is provided globally by xterm script include
-		termInstance = new Terminal({ convertEol: true, cursorBlink: true, theme: { background: '#0b0d12' } });
+		// Make sure xterm is available
+		if (!window.Terminal && typeof ensureXtermLoaded === 'function') {
+			const ok = await ensureXtermLoaded();
+			if (!ok) { console.error('xterm failed to load'); return; }
+		}
+		const TerminalCtor = window.Terminal;
+		if (!TerminalCtor) { console.error('Terminal is not defined'); return; }
+		termInstance = new TerminalCtor({ convertEol: true, cursorBlink: true, theme: { background: '#0b0d12' } });
 		termInstance.open(document.getElementById('terminal'));
-		const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || process.cwd());
+		const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || undefined);
+		if (!created || !created.id) { console.error('Terminal create failed', created); return; }
 		termId = created.id;
 		window.bridge.terminal.onData((p) => { if (p.id === termId) termInstance.write(p.data); });
-		termInstance.onData((data) => { window.bridge.terminal.write(termId, data); });
-		new ResizeObserver(() => {
-			const cols = Math.max(20, Math.floor((document.getElementById('terminal')?.clientWidth || 600) / 9));
-			const rows = Math.max(5, Math.floor((document.getElementById('terminal')?.clientHeight || 200) / 18));
+		termInstance.onData((data) => { if (termId) window.bridge.terminal.write(termId, data); });
+		const applyResize = () => {
+			const el = document.getElementById('terminal');
+			if (!el || !termInstance) return;
+			const dims = termInstance._core?._renderService?._renderer?._charSizeService;
+			const cellW = (dims && dims.width) ? dims.width : 9;
+			const cellH = (dims && dims.height) ? dims.height : 18;
+			const cols = Math.max(20, Math.floor(el.clientWidth / cellW));
+			const rows = Math.max(5, Math.floor(el.clientHeight / cellH));
+			// Resize both frontend (xterm) and backend (pty)
+			try { termInstance.resize(cols, rows); } catch {}
 			window.bridge.terminal.resize(termId, cols, rows);
-		}).observe(document.getElementById('terminal'));
+		};
+		new ResizeObserver(() => { applyResize(); }).observe(document.getElementById('terminal'));
+		// Force an initial resize and prompt redraw
+		setTimeout(() => { applyResize(); termInstance.focus(); window.bridge.terminal.write(termId, '\r'); }, 0);
 	}
 }
