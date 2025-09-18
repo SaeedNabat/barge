@@ -48,7 +48,7 @@ window.createFolderFlow = async function createFolderFlow() {
 		return '';
 	}});
 	if (!name) return;
-	await refreshTree();
+	/* incremental update handled by fs:changed */
 };
 
 async function showInputModal({ title, label, placeholder, okText = 'Create', validate, onSubmit }) {
@@ -121,7 +121,7 @@ async function refreshTree() {
 
 function scheduleRefreshTree() {
 	clearTimeout(refreshTimer);
-	refreshTimer = setTimeout(() => { refreshTree(); }, 100);
+	refreshTimer = setTimeout(() => { /* no-op: incremental updates now handle changes */ }, 100);
 }
 
 function collectTreeState() {
@@ -446,7 +446,7 @@ safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 
 	const sidebarNewFile = document.getElementById('sidebarNewFile');
 	const sidebarNewFolder = document.getElementById('sidebarNewFolder');
-	safeBind(sidebarNewFile, 'click', async () => { hideAnyModal(); if (!currentWorkspaceRoot) { alert('Open a folder first to create a file.'); return; } const base = selectedDirectoryPath || currentWorkspaceRoot; const name = await showInputModal({ title: 'New File', label: 'File name', placeholder: 'e.g. index.js', okText: 'Create File', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFile({ dir: base, name: val }); if (!res?.ok) return res?.error || 'Failed to create file'; return ''; } }); if (!name) return; await refreshTree(); const pathGuess = (selectedDirectoryPath || currentWorkspaceRoot) + '/' + name; const file = await window.bridge.readFileByPath(pathGuess); openInTabSafe(pathGuess, file?.content ?? ''); });
+			safeBind(sidebarNewFile, 'click', async () => { hideAnyModal(); if (!currentWorkspaceRoot) { alert('Open a folder first to create a file.'); return; } const base = selectedDirectoryPath || currentWorkspaceRoot; const name = await showInputModal({ title: 'New File', label: 'File name', placeholder: 'e.g. index.js', okText: 'Create File', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFile({ dir: base, name: val }); if (!res?.ok) return res?.error || 'Failed to create file'; return ''; } }); if (!name) return; const pathGuess = (selectedDirectoryPath || currentWorkspaceRoot) + '/' + name; const file = await window.bridge.readFileByPath(pathGuess); openInTabSafe(pathGuess, file?.content ?? ''); });
 	safeBind(sidebarNewFolder, 'click', () => { window.createFolderFlow(); });
 
 	document.addEventListener('click', (e) => { const t = e.target; if (t instanceof Element && t.id === 'sidebarNewFolder') { e.preventDefault(); window.createFolderFlow(); } }, true);
@@ -561,7 +561,7 @@ if (!window.__MONACO_BOOT__) {
 		window.bridge?.onFolderOpened?.((payload) => { currentWorkspaceRoot = payload.root; renderTree(payload.root, payload.tree); clearEditor(); updateEmptyState(); });
 		window.bridge?.onFileOpened?.((payload) => { openInTabSafe(payload.filePath, payload.content); updateEmptyState(); });
 		window.bridge?.onFsChanged?.((_payload) => {
-			scheduleRefreshTree();
+			handleFsChanged(_payload);
 		});
 
 		window.addEventListener('barge:pending-open', () => {
@@ -607,6 +607,141 @@ if (!window.__MONACO_BOOT__) {
 		}
 		// Expose renderer functions for early callers
 		window.bargeRenderTree = renderTree;
+
+		// Incremental file tree update helpers
+		function cssEscapeSafe(s) { try { return CSS.escape(s); } catch { return (s || '').replace(/[^a-zA-Z0-9_-]/g, '_'); } }
+
+		function getChildrenContainerForDir(dirPath) {
+			const tree = document.getElementById('fileTree');
+			if (!tree) return null;
+			if (dirPath === currentWorkspaceRoot) return tree.querySelector(':scope > .children');
+			const dirItem = tree.querySelector(`.item[data-path="${cssEscapeSafe(dirPath)}"]`);
+			if (!dirItem) return null;
+			const sib = dirItem.nextSibling;
+			return (sib && sib.classList && sib.classList.contains('children')) ? sib : null;
+		}
+
+		function compareNodePlacement(existingEl, newType, newName) {
+			let existingType = 'file';
+			let existingName = '';
+			const item = existingEl.classList.contains('item') ? existingEl : existingEl.querySelector(':scope > .item');
+			if (item) {
+				existingName = (item.querySelector('span')?.textContent || '').trim();
+				const children = item.nextSibling;
+				existingType = (children && children.classList && children.classList.contains('children')) ? 'dir' : 'file';
+			}
+			if (existingType !== newType) return existingType === 'dir' ? -1 : 1;
+			return existingName.localeCompare(newName);
+		}
+
+		function insertSorted(container, element, type, name) {
+			const kids = Array.from(container.children);
+			for (let i = 0; i < kids.length; i++) {
+				const cmp = compareNodePlacement(kids[i], type, name);
+				if (cmp > 0) { container.insertBefore(element, kids[i]); return; }
+			}
+			container.appendChild(element);
+		}
+
+		function createNodeElement(node) {
+			const el = document.createElement('div'); el.className = 'item'; el.innerHTML = `${iconSvg(node.type)} <span>${node.name}</span>`; el.dataset.path = node.path || ''; el.draggable = true;
+			if (node.type === 'file') {
+				el.addEventListener('click', async () => { const res = await window.bridge.readFileByPath(node.path); openInTabSafe(node.path, res?.content ?? ''); updateEmptyState(); });
+				return el;
+			} else {
+				const children = document.createElement('div'); children.className = 'children'; children.style.display = 'none';
+				let expanded = false;
+				el.addEventListener('click', () => { expanded = !expanded; children.style.display = expanded ? 'block' : 'none'; selectedDirectoryPath = node.path; highlightSelectedDir(el); });
+				const wrap = document.createElement('div'); wrap.appendChild(el); wrap.appendChild(children); return wrap;
+			}
+		}
+
+		function removePathFromTree(targetPath) {
+			const tree = document.getElementById('fileTree'); if (!tree) return;
+			const item = tree.querySelector(`.item[data-path="${cssEscapeSafe(targetPath)}"]`);
+			if (!item) return;
+			const maybeWrap = item.parentElement;
+			if (maybeWrap && maybeWrap.firstChild === item && maybeWrap.children.length === 2 && maybeWrap.lastChild.classList.contains('children')) {
+				maybeWrap.remove();
+			} else {
+				item.remove();
+			}
+		}
+
+		function updatePathDatasetRecursive(rootEl, oldPrefix, newPrefix) {
+			if (!rootEl) return;
+			const items = rootEl.querySelectorAll('.item');
+			items.forEach((it) => {
+				const p = it.dataset.path;
+				if (p && p.startsWith(oldPrefix)) {
+					const rest = p.slice(oldPrefix.length);
+					it.dataset.path = newPrefix + rest;
+					const span = it.querySelector('span');
+					if (span && span.textContent && span.textContent === (oldPrefix + rest).split('/').pop()) {
+						span.textContent = (newPrefix + rest).split('/').pop();
+					}
+				}
+			});
+		}
+
+		function renamePathInTree(oldPath, newPath) {
+			const tree = document.getElementById('fileTree'); if (!tree) return;
+			const item = tree.querySelector(`.item[data-path="${cssEscapeSafe(oldPath)}"]`);
+			if (!item) return;
+			const newName = newPath.split('/').pop();
+			item.dataset.path = newPath;
+			const span = item.querySelector('span'); if (span) span.textContent = newName;
+			const sibling = item.nextSibling;
+			if (sibling && sibling.classList.contains('children')) {
+				updatePathDatasetRecursive(sibling, oldPath + '/', newPath + '/');
+			}
+			// Re-sort within parent container
+			const parentContainer = item.parentElement && item.parentElement.classList.contains('children') ? item.parentElement : (item.parentElement?.parentElement?.classList.contains('children') ? item.parentElement.parentElement : null);
+			if (parentContainer) {
+				const wrap = (sibling && sibling.classList.contains('children')) ? item.parentElement : item;
+				wrap.remove();
+				insertSorted(parentContainer, wrap, (sibling ? 'dir' : 'file'), newName);
+			}
+		}
+
+		function movePathInTree(oldPath, newPath) {
+			const tree = document.getElementById('fileTree'); if (!tree) return;
+			const item = tree.querySelector(`.item[data-path="${cssEscapeSafe(oldPath)}"]`);
+			if (!item) return;
+			const isDir = !!(item.nextSibling && item.nextSibling.classList && item.nextSibling.classList.contains('children'));
+			const newParentDir = newPath.split('/').slice(0, -1).join('/');
+			const container = getChildrenContainerForDir(newParentDir);
+			if (!container) { refreshTree(); return; }
+			const wrap = (isDir && item.parentElement && item.parentElement.firstChild === item) ? item.parentElement : item;
+			const newName = newPath.split('/').pop();
+			item.dataset.path = newPath;
+			const span = item.querySelector('span'); if (span) span.textContent = newName;
+			if (isDir) updatePathDatasetRecursive(item.nextSibling, oldPath + '/', newPath + '/');
+			wrap.remove();
+			insertSorted(container, wrap, isDir ? 'dir' : 'file', newName);
+			container.style.display = 'block';
+		}
+
+		function createPathInTree(targetPath, type) {
+			const parentDir = targetPath.split('/').slice(0, -1).join('/');
+			const container = getChildrenContainerForDir(parentDir);
+			if (!container) { refreshTree(); return; }
+			const node = { type, name: targetPath.split('/').pop(), path: targetPath };
+			const el = createNodeElement(node);
+			insertSorted(container, el, type, node.name);
+			container.style.display = 'block';
+		}
+
+		function handleFsChanged(payload) {
+			if (!payload) return;
+			switch (payload.kind) {
+				case 'mkdir': createPathInTree(payload.path, 'dir'); break;
+				case 'create': createPathInTree(payload.path, 'file'); break;
+				case 'rename': renamePathInTree(payload.oldPath, payload.path); break;
+				case 'move': movePathInTree(payload.oldPath, payload.path); break;
+				case 'delete': removePathFromTree(payload.path); break;
+			}
+		}
 
 		function enableTreeKeyboard(container) {
 			container.tabIndex = 0;
@@ -674,7 +809,7 @@ if (!window.__MONACO_BOOT__) {
 						{ label: 'New Folder', action: async () => {
 							hideAnyModal();
 							const name = await showInputModal({ title: 'New Folder', label: 'Folder name', placeholder: 'e.g. src', okText: 'Create Folder', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFolder({ root: itemPath, name: val }); if (!res?.ok) return res?.error || 'Failed to create folder'; return ''; } });
-							if (!name) return; await refreshTree();
+							if (!name) return; /* incremental update handled by fs:changed */
 						}}
 					);
 				} else {
@@ -736,7 +871,7 @@ if (!window.__MONACO_BOOT__) {
 				return '';
 			}});
 			if (!newName) return;
-			await refreshTree();
+			/* incremental update handled by fs:changed */
 		}
 
 		async function deleteFlow(targetPath) {
@@ -749,7 +884,7 @@ if (!window.__MONACO_BOOT__) {
 				return '';
 			}});
 			if (!confirmed) return;
-			await refreshTree();
+			/* incremental update handled by fs:changed */
 		}
 
 		function iconSvg(kind) { if (kind === 'dir') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7h6l2 2h10v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="#8aa2c4"/></svg>'; return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="5" y="3" width="14" height="18" rx="2" ry="2" stroke="#9aa2b2"/></svg>'; }
