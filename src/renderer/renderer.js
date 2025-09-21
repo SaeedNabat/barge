@@ -186,6 +186,63 @@ function applySettings() {
 	monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
 	document.body.classList.toggle('theme-light', settings.theme === 'light');
 	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace });
+	
+	// Update terminal theme if terminal exists
+	updateTerminalTheme();
+}
+
+function updateTerminalTheme() {
+	if (!termInstance) return;
+	
+	const isLightTheme = settings.theme === 'light';
+	
+	if (isLightTheme) {
+		termInstance.options.theme = {
+			background: 'rgba(245, 247, 251, 0.9)',
+			foreground: '#0f172a',
+			cursor: '#2563eb',
+			selection: 'rgba(59, 130, 246, 0.3)',
+			black: '#0f172a',
+			red: '#dc2626',
+			green: '#16a34a',
+			yellow: '#ca8a04',
+			blue: '#2563eb',
+			magenta: '#9333ea',
+			cyan: '#0891b2',
+			white: '#f8fafc',
+			brightBlack: '#475569',
+			brightRed: '#ef4444',
+			brightGreen: '#22c55e',
+			brightYellow: '#eab308',
+			brightBlue: '#3b82f6',
+			brightMagenta: '#a855f7',
+			brightCyan: '#06b6d4',
+			brightWhite: '#ffffff'
+		};
+	} else {
+		termInstance.options.theme = {
+			background: '#0b0d12',
+			foreground: '#ffffff',
+			cursor: '#ffffff',
+			selection: '#264f78',
+			black: '#000000',
+			red: '#cd3131',
+			green: '#0dbc79',
+			yellow: '#e5e510',
+			blue: '#2472c8',
+			magenta: '#bc3fbc',
+			cyan: '#11a8cd',
+			white: '#e5e5e5',
+			brightBlack: '#666666',
+			brightRed: '#f14c4c',
+			brightGreen: '#23d18b',
+			brightYellow: '#f5f543',
+			brightBlue: '#3b8eea',
+			brightMagenta: '#d670d6',
+			brightCyan: '#29b8db',
+			brightWhite: '#ffffff'
+		};
+	}
 }
 
 function updateEmptyState() {
@@ -1544,6 +1601,9 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 				window.dispatchEvent(new Event('barge:monaco-ready'));
 				console.log('Monaco editor initialized and ready');
 
+				// Apply all settings now that Monaco is ready
+				applySettings();
+
 				// Process any pending files now that Monaco is ready
 				if (window.__PENDING_OPEN__) {
 					const p = window.__PENDING_OPEN__;
@@ -1558,5 +1618,3 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 			});
 		}
 	});
-
-
