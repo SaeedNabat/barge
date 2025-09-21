@@ -12,16 +12,21 @@
 	<body>
 		<div class="window gradient-bg">
 			<div class="titlebar" style="-webkit-app-region: drag;">
-				<div class="title">Barge</div>
+				<div class="title">
+					<img src="../assets/barge.png" alt="Barge" class="app-logo" />
+					<span>Barge</span>
+				</div>
 				<div class="window-controls" style="-webkit-app-region: no-drag;">
 					<button id="winMin" title="Minimize" aria-label="Minimize">
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"><path d="M5 19h14"/></svg>
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="#38bdf8"><rect x="6" y="11" width="12" height="2" rx="1"/></svg>
 					</button>
 					<button id="winMax" title="Maximize" aria-label="Maximize">
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="#22c55e"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
 					</button>
 					<button id="winClose" title="Close" aria-label="Close">
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+						<svg width="12" height="12" viewBox="0 0 24 24" fill="#ef4444">
+							<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/>
+						</svg>
 					</button>
 				</div>
 			</div>
@@ -78,15 +83,14 @@
 				<aside class="sidebar">
 					<div class="sidebar-toolbar">
 						<button id="sidebarNewFile" title="New File" class="icon-btn accent" aria-label="New File">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z" opacity=".6"/>
-								<path d="M14 2v7h7" opacity=".6"/>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="#60a5fa">
+								<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/>
+								<path d="M14 2v7h7"/>
 								<path d="M12 11v6M9 14h6"/>
-								<path d="M6 6l1.5-.5M18 6l-1.5-.5M12 4l0-1" stroke="#93c5fd" stroke-width="1.5"/>
 							</svg>
 						</button>
 						<button id="sidebarNewFolder" title="New Folder" class="icon-btn" aria-label="New Folder">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="#34d399">
 								<path d="M3 7h5l2 2h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
 								<path d="M12 13v6M9 16h6"/>
 							</svg>
@@ -205,6 +209,37 @@
 				<div id="cmdEmpty" class="cmd-empty hidden">No matches. Try different keywords.</div>
 			</div>
 		</div>
+		
+		<!-- About Modal -->
+		<div id="aboutModal" class="modal hidden">
+			<div class="modal-backdrop"></div>
+			<div class="modal-card about-card">
+				<div class="about-header">
+					<img src="barge.png" alt="Barge" class="about-logo" />
+					<h2>Barge Editor</h2>
+					<p class="version">Version 1.0.0</p>
+				</div>
+				<div class="about-content">
+					<p>A modern, feature-rich code editor built with Electron and Monaco Editor.</p>
+					<div class="about-features">
+						<h3>Features</h3>
+						<ul>
+							<li>Syntax highlighting for multiple languages</li>
+							<li>Integrated terminal</li>
+							<li>File tree navigation</li>
+							<li>Dark/Light theme support</li>
+							<li>Command palette</li>
+							<li>Search and replace</li>
+						</ul>
+					</div>
+					<div class="about-footer">
+						<p>&copy; 2024 Barge Editor. Built with ❤️ using Electron.</p>
+					</div>
+				</div>
+				<button id="aboutClose" class="modal-close">Close</button>
+			</div>
+		</div>
+		
 		<!-- Load xterm browser bundle so Terminal is global -->
 		<script src="../../node_modules/xterm/lib/xterm.js"></script>
 		<script src="renderer.js"></script>

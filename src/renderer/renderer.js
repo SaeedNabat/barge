@@ -146,13 +146,16 @@ function collectTreeState() {
 
 function createUntitled() {
 	const name = `Untitled-${untitledCounter++}.txt`;
-	if (typeof window.bargeOpenFileInTab === 'function') {
-		window.bargeOpenFileInTab(name, '');
-		updateEmptyState();
+	// Create a new untitled file directly without any dialog
+	if (monacoRef) {
+		// Monaco is ready, open file directly
+		openFileInTab(name, '');
 	} else {
+		// Monaco not ready, queue the file opening
 		window.__PENDING_OPEN__ = { filePath: name, content: '' };
 		window.dispatchEvent(new Event('barge:pending-open'));
 	}
+	updateEmptyState();
 }
 
 function isUntitledPath(p) {
@@ -180,7 +183,7 @@ function saveSettings() { localStorage.setItem('barge:settings', JSON.stringify(
 function applySettings() {
 	if (!editor || !monacoRef) return;
 	editor.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize });
-	monacoRef.editor.setTheme(settings.theme === 'light' ? 'vs' : 'barge-dark');
+	monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
 	document.body.classList.toggle('theme-light', settings.theme === 'light');
 	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace });
 }
@@ -189,15 +192,6 @@ function updateEmptyState() {
 	const modal = document.getElementById('emptyStateModal');
 	const hasAny = openTabs.length > 0 || !!currentWorkspaceRoot;
 	modal?.classList.toggle('hidden', hasAny);
-}
-
-function clearEditor() {
-	if (editor) {
-		editor.setValue('');
-		editor.updateOptions({ language: 'plaintext' });
-	}
-	const filenameEl = document.getElementById('filename');
-	if (filenameEl) filenameEl.textContent = '';
 }
 
 // Early bootstrap to ensure clicks work even if Monaco hasn't finished loading
@@ -280,6 +274,16 @@ window.addEventListener('DOMContentLoaded', () => {
 
 	const mFileNew = document.getElementById('mFileNew');
 	const newFileBtn = document.getElementById('sidebarNewFile');
+
+	// Window control elements
+	const winMin = document.getElementById('winMin');
+	const winMax = document.getElementById('winMax');
+	const winClose = document.getElementById('winClose');
+
+	// About modal elements
+	const mHelpAbout = document.getElementById('mHelpAbout');
+	const aboutModal = document.getElementById('aboutModal');
+	const aboutClose = document.getElementById('aboutClose');
 
 	const mEditFind = document.getElementById('mEditFind');
 	const mEditFindInFiles = document.getElementById('mEditFindInFiles');
@@ -406,11 +410,23 @@ window.addEventListener('DOMContentLoaded', () => {
 	safeBind(mFileCloseAll, 'click', () => { if (window.__closeAllTabs) { window.__closeAllTabs(); } else { window.__PENDING_CLOSE_ALL__ = true; } });
 	safeBind(mFileReopenClosed, 'click', () => { if (window.__reopenClosedTab) { window.__reopenClosedTab(); } else { window.__PENDING_REOPEN_CLOSED__ = true; } });
 safeBind(mFileSaveAs, 'click', async () => { if (!editor) return; const content = editor.getModel()?.getValue(); const res = await window.bridge.saveAs(content); if (res?.filePath) { const old = activeTabPath; activeTabPath = res.filePath; const model = modelsByPath.get(old); if (model) { modelsByPath.delete(old); const newModel = monacoRef.editor.createModel(content ?? '', guessLanguage(res.filePath), monacoRef.Uri.file(res.filePath)); modelsByPath.set(res.filePath, newModel); editor.setModel(newModel); } const tab = openTabs.find(t => t.path === old); if (tab) { tab.path = res.filePath; tab.title = basename(res.filePath); tab._titleEl.textContent = tab.title; } updateEmptyState(); } });
-safeBind(mFileNew, 'click', () => { hideAnyModal(); if (monacoRef) createUntitled(); else { window.addEventListener('barge:monaco-ready', () => createUntitled(), { once: true }); } });
-// removed early newFileBtn binding to allow folder-aware handler later
+		// Make sure the New File binding is correct
+		safeBind(mFileNew, 'click', () => { 
+			hideAnyModal(); 
+			createUntitled();
+		});
 safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 
-	// Basic menu bindings
+// Window control bindings
+safeBind(winMin, 'click', () => window.bridge?.window?.minimize?.());
+safeBind(winMax, 'click', () => window.bridge?.window?.maximizeToggle?.());
+safeBind(winClose, 'click', () => window.bridge?.window?.close?.());
+
+// About modal bindings
+safeBind(mHelpAbout, 'click', () => { aboutModal.classList.remove('hidden'); });
+safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
+
+// Basic menu bindings
 	safeBind(mEditUndo, 'click', () => { editor?.trigger('menu', 'undo', null); });
 	safeBind(mEditRedo, 'click', () => { editor?.trigger('menu', 'redo', null); });
 	safeBind(mEditPreferences, 'click', () => { if (typeof openPrefs === 'function') openPrefs(); else setTimeout(() => openPrefs?.(), 100); });
@@ -507,471 +523,482 @@ safeBind(mFileExit, 'click', () => window.bridge?.window?.close?.());
 	const terminalPanel = document.getElementById('terminalPanel');
 	const terminalEl = document.getElementById('terminal');
 
+	// Improved terminal loading using AMD loader
 	async function ensureXtermLoaded() {
-		if (window.Terminal) return true;
-		// Try to load xterm dynamically if not present
-		return await new Promise((resolve) => {
-			const script = document.createElement('script');
-			script.src = new URL('../../node_modules/xterm/lib/xterm.js', document.baseURI).toString();
-			script.onload = () => resolve(true);
-			script.onerror = () => resolve(false);
-			document.head.appendChild(script);
-		});
+		console.log('=== XTERM LOADING START ===');
+		console.log('window.Terminal available:', !!window.Terminal);
+		
+		// Check if Terminal is already available
+		if (window.Terminal) {
+			console.log('✓ Terminal already available');
+			return true;
+		}
+		
+		console.log('Terminal not available, trying AMD loader...');
+		
+		// Try to load xterm using the AMD loader
+		try {
+			// Configure AMD paths for xterm
+			if (window.require && window.require.config) {
+				require.config({
+					paths: {
+						'xterm': '../../node_modules/xterm/lib/xterm'
+					}
+				});
+			}
+			
+			// Load xterm using AMD
+			return new Promise((resolve) => {
+				require(['xterm'], (xterm) => {
+					console.log('✓ xterm loaded via AMD:', xterm);
+					// Make Terminal available globally
+					window.Terminal = xterm.Terminal;
+					window.TerminalAddon = xterm.TerminalAddon;
+					resolve(true);
+				}, (error) => {
+					console.error('✗ AMD xterm loading failed:', error);
+					resolve(false);
+				});
+			});
+		} catch (error) {
+			console.error('✗ AMD loading attempt failed:', error);
+			return false;
+		}
+	}
+
+	// Simplified fallback - no CDN since CSP blocks it
+	async function ensureXtermLoadedWithFallback() {
+		console.log('=== XTERM LOADING WITH FALLBACK ===');
+		
+		// Just try the local loading since CDN is blocked by CSP
+		const success = await ensureXtermLoaded();
+		if (success) {
+			return true;
+		}
+		
+		console.error('✗ xterm failed to load - check if xterm is properly installed');
+		console.error('Trying to manually check xterm script...');
+		
+		// Try to manually check if the script loaded
+		const scripts = Array.from(document.scripts);
+		const xtermScript = scripts.find(s => s.src.includes('xterm'));
+		console.log('Xterm script found:', !!xtermScript);
+		if (xtermScript) {
+			console.log('Xterm script src:', xtermScript.src);
+			console.log('Xterm script loaded:', xtermScript.readyState);
+		}
+		
+		return false;
 	}
 
 	safeBind(mViewToggleTerminal, 'click', async () => {
 		terminalPanel?.classList.toggle('hidden');
 		if (!terminalPanel?.classList.contains('hidden')) {
-			const ok = await ensureXtermLoaded();
-			if (ok) await ensureTerminal();
+			await ensureTerminal();
 			termInstance?.focus();
 		}
 	});
-
-	document.addEventListener('click', (e) => {
-		const t = e.target;
-		if (t instanceof Element && t.id === 'sidebarNewFile') {
-			e.preventDefault(); hideAnyModal(); if (monacoRef) createUntitled();
-		}
-	}, true);
-});
-
-if (!window.__MONACO_BOOT__) {
-	window.__MONACO_BOOT__ = true;
-	require(['vs/editor/editor.main'], function () {
-		monacoRef = window.monaco;
-		const editorContainer = document.getElementById('editor');
-		const filenameEl = document.getElementById('filename');
-		const fileTreeEl = document.getElementById('fileTree');
-		const tabsEl = document.getElementById('tabs');
-		const cursorPosEl = document.getElementById('cursorPos');
-		const langEl = document.getElementById('lang');
-		const winMin = document.getElementById('winMin');
-		const winMax = document.getElementById('winMax');
-		const winClose = document.getElementById('winClose');
-
-		// Configurable menubar hover delays (ms)
-		const MENU_HOVER_OPEN_DELAY = 150;
-		const MENU_HOVER_CLOSE_DELAY = 150;
-		const MENU_OPEN_MODE = 'hover';
-
-		// Menubar open/close behavior with delay to prevent accidental close
-		const menubar = document.getElementById('menubar');
-		let closeTimeout = null;
-		function closeAllMenus() { menubar?.querySelectorAll('.menu.open').forEach(el => el.classList.remove('open')); }
-		function openMenu(menuEl) {
-			if (!menuEl) return;
-			menubar?.querySelectorAll('.menu.open').forEach((m) => { if (m !== menuEl) m.classList.remove('open'); });
-			menuEl.classList.add('open');
-			try { const idx = indexOfMenu(menuEl); localStorage.setItem('barge:lastMenu', String(idx)); } catch {}
-		}
-		function getMenuLabel(menuEl) { return menuEl?.querySelector?.('.menu-label'); }
-		function getMenuItems(menuEl) { return Array.from(menuEl?.querySelectorAll?.('.dropdown .menu-item') || []); }
-
-		menubar?.querySelectorAll('.menu').forEach((menuEl) => {
-			let openTimer = null; let hideTimer = null;
-			const label = getMenuLabel(menuEl);
-			const dropdown = menuEl.querySelector('.dropdown');
-
-			if (MENU_OPEN_MODE === 'hover') {
-				menuEl.addEventListener('mouseenter', () => {
-					clearTimeout(hideTimer); clearTimeout(openTimer);
-					openTimer = setTimeout(() => { openMenu(menuEl); }, MENU_HOVER_OPEN_DELAY);
-				});
-				menuEl.addEventListener('mouseleave', () => {
-					clearTimeout(openTimer); clearTimeout(hideTimer);
-					hideTimer = setTimeout(() => { menuEl.classList.remove('open'); }, MENU_HOVER_CLOSE_DELAY);
-				});
-				if (dropdown) {
-					dropdown.addEventListener('mouseenter', () => { clearTimeout(hideTimer); openMenu(menuEl); });
-					dropdown.addEventListener('mouseleave', () => { clearTimeout(hideTimer); hideTimer = setTimeout(() => { menuEl.classList.remove('open'); }, MENU_HOVER_CLOSE_DELAY); });
+		// Fixed terminal initialization with improved xterm loading
+		async function ensureTerminal() {
+			console.log('=== TERMINAL INITIALIZATION START ===');
+			
+			if (!termInstance) {
+				// Step 1: Ensure xterm is loaded with fallback
+				console.log('Step 1: Loading xterm...');
+				const xtermLoaded = await ensureXtermLoadedWithFallback();
+				
+				if (!xtermLoaded) {
+					console.error('✗ xterm failed to load completely');
+					alert('Terminal library failed to load. Please check your internet connection and refresh the page.');
+					return;
 				}
-			}
-
-			label?.addEventListener('pointerdown', (e) => {
-				if (e.button !== 0) return;
-				e.preventDefault();
-				const isOpen = menuEl.classList.contains('open');
-				if (!isOpen) { openMenu(menuEl); } else { menuEl.classList.remove('open'); }
-				label.focus();
-			});
-		});
-
-		menubar?.addEventListener('focusin', (e) => {
-			if (!menubar.contains(document.activeElement)) return;
-			try {
-				const stored = parseInt(localStorage.getItem('barge:lastMenu') || '-1', 10);
-				const menus = Array.from(menubar.querySelectorAll('.menu'));
-				if (stored >= 0 && stored < menus.length) {
-					openMenu(menus[stored]);
+				console.log('✓ xterm loaded successfully');
+				
+				// Step 2: Check terminal element
+				console.log('Step 2: Checking terminal element...');
+				const terminalEl = document.getElementById('terminal');
+				if (!terminalEl) {
+					console.error('✗ Terminal element not found');
+					return;
 				}
-			} catch {}
-		});
-
-		winMin?.addEventListener('click', () => window.bridge?.window?.minimize?.());
-		winMax?.addEventListener('click', () => window.bridge?.window?.maximizeToggle?.());
-		winClose?.addEventListener('click', () => window.bridge?.window?.close?.());
-
-		monacoRef.editor.defineTheme('barge-dark', { base: 'vs-dark', inherit: true, rules: [], colors: { 'editor.background': '#0f1115', 'editor.lineHighlightBackground': '#151a24', 'editorLineNumber.foreground': '#3a4256', 'editorCursor.foreground': '#9cdcfe', 'editor.selectionBackground': '#264f78aa' }, });
-
-		editor = monacoRef.editor.create(editorContainer, { value: '// New file\n', language: 'javascript', theme: settings.theme === 'light' ? 'vs' : 'barge-dark', automaticLayout: true, minimap: { enabled: true }, fontFamily: settings.fontFamily, fontSize: settings.fontSize, autoClosingBrackets: 'languageDefined', autoClosingQuotes: 'languageDefined', bracketPairColorization: { enabled: true }, matchBrackets: 'always', });
-		// announce monaco readiness for any deferred actions
-		window.dispatchEvent(new Event('barge:monaco-ready'));
-
-		window.__EDITOR_GET_VALUE__ = () => editor.getValue();
-
-		editor.onDidChangeCursorPosition(() => updateStatus());
-		editor.onDidChangeModelContent(() => { markDirty(activeTabPath, true); handleAutoSave(); });
-		window.addEventListener('blur', () => { if (settings.autoSave === 'onFocusChange') saveActiveFile(); });
-
-		window.bridge?.onFolderOpened?.((payload) => { currentWorkspaceRoot = payload.root; renderTree(payload.root, payload.tree); clearEditor(); updateEmptyState(); });
-		window.bridge?.onFileOpened?.((payload) => { openInTabSafe(payload.filePath, payload.content); updateEmptyState(); });
-		window.bridge?.onFsChanged?.((_payload) => {
-			handleFsChanged(_payload);
-		});
-
-		window.addEventListener('barge:pending-open', () => {
-			if (window.__PENDING_OPEN__) {
-				const p = window.__PENDING_OPEN__;
-				openInTabSafe(p.filePath, p.content);
-				window.__PENDING_OPEN__ = null;
+				console.log('✓ Terminal element found');
+				
+				// Step 3: Check terminal panel visibility
+				console.log('Step 3: Checking terminal panel...');
+				const terminalPanel = document.getElementById('terminalPanel');
+				if (terminalPanel?.classList.contains('hidden')) {
+					console.log('Making terminal panel visible...');
+					terminalPanel.classList.remove('hidden');
+				}
+				console.log('✓ Terminal panel visible');
+				
+				// Step 4: Create terminal instance
+				console.log('Step 4: Creating terminal instance...');
+				try {
+					termInstance = new window.Terminal({
+						convertEol: true,
+						cursorBlink: true,
+						theme: {
+							background: '#0b0d12',
+							foreground: '#ffffff',
+							cursor: '#ffffff',
+							selection: '#264f78'
+						},
+						fontSize: 14,
+						fontFamily: 'JetBrains Mono, Fira Code, Menlo, Consolas, monospace',
+						rows: 24,
+						cols: 80,
+						scrollback: 1000
+					});
+					console.log('✓ Terminal instance created');
+				} catch (error) {
+					console.error('✗ Failed to create terminal instance:', error);
+					alert('Failed to create terminal: ' + error.message);
+					return;
+				}
+				
+				// Step 5: Open terminal in DOM
+				console.log('Step 5: Opening terminal in DOM...');
+				try {
+					termInstance.open(terminalEl);
+					console.log('✓ Terminal opened in DOM');
+				} catch (error) {
+					console.error('✗ Failed to open terminal:', error);
+					return;
+				}
+				
+				// Step 6: Check bridge
+				console.log('Step 6: Checking bridge...');
+				if (!window.bridge || !window.bridge.terminal) {
+					console.error('✗ Terminal bridge not available');
+					termInstance.write('Terminal bridge not available.\r\n');
+					return;
+				}
+				console.log('✓ Terminal bridge available');
+				
+				// Step 7: Create terminal process
+				console.log('Step 7: Creating terminal process...');
+				try {
+					const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || undefined);
+					console.log('Terminal create result:', created);
+					
+					if (!created || !created.id) {
+						console.error('✗ Terminal create failed:', created);
+						termInstance.write('Failed to create terminal process.\r\n');
+						return;
+					}
+					
+					termId = created.id;
+					console.log('✓ Terminal process created with ID:', termId);
+				} catch (error) {
+					console.error('✗ Terminal process creation failed:', error);
+					termInstance.write('Terminal process creation failed: ' + error.message + '\r\n');
+					return;
+				}
+				
+				// Step 8: Set up data handlers
+				console.log('Step 8: Setting up data handlers...');
+				window.bridge.terminal.onData((p) => {
+					if (p.id === termId && termInstance) {
+						termInstance.write(p.data);
+					}
+				});
+				
+				termInstance.onData((data) => {
+					if (termId && window.bridge.terminal.write) {
+						window.bridge.terminal.write(termId, data);
+					}
+				});
+				console.log('✓ Data handlers set up');
+				
+				// Step 9: Set up resize handling
+				console.log('Step 9: Setting up resize handling...');
+				const applyResize = () => {
+					const el = document.getElementById('terminal');
+					if (!el || !termInstance) return;
+					
+					const cols = Math.max(20, Math.floor(el.clientWidth / 9));
+					const rows = Math.max(5, Math.floor(el.clientHeight / 18));
+					
+					try {
+						termInstance.resize(cols, rows);
+						if (window.bridge.terminal.resize && termId) {
+							window.bridge.terminal.resize(termId, cols, rows);
+						}
+					} catch (err) {
+						console.error('Resize failed:', err);
+					}
+				};
+				
+				const resizeObserver = new ResizeObserver(() => {
+					setTimeout(applyResize, 100);
+				});
+				resizeObserver.observe(terminalEl);
+				console.log('✓ Resize handling set up');
+				
+				// Step 10: Initial setup
+				console.log('Step 10: Initial setup...');
+				setTimeout(() => {
+					applyResize();
+					termInstance.focus();
+					
+					// Send initial commands to ensure prompt appears
+					if (window.bridge.terminal.write && termId) {
+						window.bridge.terminal.write(termId, 'clear\r');
+						setTimeout(() => {
+							window.bridge.terminal.write(termId, 'echo "Terminal ready!"\r');
+						}, 100);
+					}
+				}, 300);
+				
+				console.log('✓ Terminal fully initialized');
+				console.log('=== TERMINAL INIT COMPLETE ===');
+				
+			} else {
+				console.log('Terminal already exists, focusing...');
+				termInstance.focus();
 			}
-		});
-		window.addEventListener('barge:pending-folder', () => {
-			if (window.__PENDING_FOLDER__) {
-				const f = window.__PENDING_FOLDER__;
-				currentWorkspaceRoot = f.root;
-				renderTree(f.root, f.tree);
-				clearEditor();
-				window.__PENDING_FOLDER__ = null;
+		}
+
+		// Simple terminal test - add this to test basic functionality
+		function testTerminal() {
+			console.log('=== TERMINAL TEST START ===');
+			
+			// Check if Terminal is available
+			console.log('window.Terminal available:', !!window.Terminal);
+			
+			// Check terminal element
+			const terminalEl = document.getElementById('terminal');
+			console.log('Terminal element:', terminalEl);
+			console.log('Terminal element dimensions:', terminalEl ? {
+				width: terminalEl.clientWidth,
+				height: terminalEl.clientHeight,
+				offsetWidth: terminalEl.offsetWidth,
+				offsetHeight: terminalEl.offsetHeight
+			} : 'not found');
+			
+			// Check terminal panel
+			const terminalPanel = document.getElementById('terminalPanel');
+			console.log('Terminal panel:', terminalPanel);
+			console.log('Terminal panel hidden:', terminalPanel?.classList.contains('hidden'));
+			
+			// Check bridge
+			console.log('window.bridge available:', !!window.bridge);
+			console.log('window.bridge.terminal available:', !!(window.bridge && window.bridge.terminal));
+			
+			console.log('=== TERMINAL TEST END ===');
+		}
+
+		// Make test function available globally
+		window.testTerminal = testTerminal;
+
+		// Add DOM ready handler to ensure proper initialization timing
+		document.addEventListener('DOMContentLoaded', () => {
+			console.log('DOM Content Loaded - Terminal should be available now');
+			
+			// Check if Terminal is available
+			if (window.Terminal) {
+				console.log('✓ Terminal is available on DOM ready');
+			} else {
+				console.log('⚠ Terminal not yet available on DOM ready');
 			}
+			
+			// Make terminal initialization available globally for testing
+			window.initializeTerminal = async () => {
+				console.log('Manual terminal initialization triggered');
+				await ensureTerminal();
+			};
 		});
 
-		const buffered = window.bridge?.getLastOpened?.();
-		if (buffered) openInTabSafe(buffered.filePath, buffered.content);
-		if (window.__PENDING_OPEN__) { const p = window.__PENDING_OPEN__; openInTabSafe(p.filePath, p.content); window.__PENDING_OPEN__ = null; }
-		if (window.__PENDING_FOLDER__) { const f = window.__PENDING_FOLDER__; currentWorkspaceRoot = f.root; renderTree(f.root, f.tree); clearEditor(); window.__PENDING_FOLDER__ = null; updateEmptyState(); }
+		// Add missing functions for file tree and editor functionality
+		function iconSvg(kind, filename = '') {
+			if (kind === 'dir') {
+				return '<svg width="14" height="14" viewBox="0 0 24 24" fill="#4ade80"><path d="M3 7h6l2 2h10v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
+			}
+			
+			// Get file extension for color coding
+			const ext = filename.split('.').pop()?.toLowerCase();
+			
+			// Color-coded file icons based on extension
+			const iconColors = {
+				// Code files
+				'js': '#f7df1e', 'jsx': '#61dafb', 'ts': '#3178c6', 'tsx': '#61dafb',
+				'py': '#3776ab', 'rb': '#cc342d', 'go': '#00add8', 'rs': '#ce422b',
+				'java': '#ed8b00', 'cpp': '#00599c', 'c': '#00599c', 'cs': '#239120',
+				'php': '#777bb4', 'swift': '#fa7343', 'kt': '#7f52ff', 'scala': '#dc322f',
+				'clj': '#5881d8', 'hs': '#5d4f85',
+				
+				// Web files
+				'html': '#e34f26', 'htm': '#e34f26', 'xml': '#ff6600', 'svg': '#ff6600',
+				'css': '#1572b6', 'scss': '#cf649a', 'sass': '#cf649a', 'less': '#1d365d',
+				
+				// Data files
+				'json': '#000000', 'yaml': '#cb171e', 'yml': '#cb171e', 'toml': '#9c4221',
+				'md': '#083fa1', 'markdown': '#083fa1', 'rst': '#14a085',
+				
+				// Scripts
+				'sql': '#336791', 'sh': '#4eaa25', 'bash': '#4eaa25', 'zsh': '#4eaa25',
+				'fish': '#4eaa25', 'ps1': '#012456',
+				
+				// Config files
+				'dockerfile': '#2496ed', 'makefile': '#427819', 'cmake': '#064f8c',
+				'ini': '#1f1f1f', 'conf': '#1f1f1f', 'cfg': '#1f1f1f', 'properties': '#1f1f1f',
+				
+				// Other
+				'log': '#666666', 'txt': '#666666', 'text': '#666666'
+			};
+			
+			const color = iconColors[ext] || '#8aa2c4';
+			
+			// Different icons for different file types
+			if (['js', 'jsx', 'ts', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'cpp', 'c', 'cs', 'php', 'swift', 'kt', 'scala', 'clj', 'hs'].includes(ext)) {
+				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
+			} else if (['html', 'htm', 'xml', 'svg'].includes(ext)) {
+				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
+			} else if (['css', 'scss', 'sass', 'less'].includes(ext)) {
+				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
+			} else if (['json', 'yaml', 'yml', 'toml'].includes(ext)) {
+				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
+			} else if (['md', 'markdown', 'rst'].includes(ext)) {
+				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
+			} else if (['sql', 'sh', 'bash', 'zsh', 'fish', 'ps1'].includes(ext)) {
+				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
+			} else {
+				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
+			}
+		}
 
-		loadExtensions();
+		function renderNode(node) {
+			const el = document.createElement('div');
+			el.className = 'item';
+			el.dataset.path = node.path;
+			el.dataset.type = node.type;
+			
+			const icon = document.createElement('span');
+			icon.className = 'icon';
+			icon.innerHTML = iconSvg(node.type, node.name); // Pass the filename
+			el.appendChild(icon);
+			
+			const name = document.createElement('span');
+			name.className = 'name';
+			name.textContent = node.name;
+			el.appendChild(name);
+			
+			if (node.type === 'dir') {
+				// Add expand/collapse functionality
+				el.addEventListener('click', (e) => {
+					e.stopPropagation();
+					const children = el.nextSibling;
+					if (children && children.classList.contains('children')) {
+						const isExpanded = children.style.display === 'block';
+						children.style.display = isExpanded ? 'none' : 'block';
+						el.classList.toggle('expanded', !isExpanded);
+					}
+				});
+				
+				// Create children container and add it after the element
+				const children = document.createElement('div');
+				children.className = 'children';
+				children.style.display = 'none';
+				
+				// Add child nodes to the children container
+				if (node.children) {
+					for (const child of node.children) {
+						children.appendChild(renderNode(child));
+					}
+				}
+				
+				// Return both the element and its children container
+				const container = document.createElement('div');
+				container.appendChild(el);
+				container.appendChild(children);
+				return container;
+			} else {
+				el.addEventListener('click', () => {
+					highlightSelectedDir(el);
+					// Queue file opening until Monaco is ready
+					if (monacoRef) {
+						// Monaco is ready, open file directly
+						window.bridge.readFileByPath(node.path).then(file => {
+							if (file && file.content !== undefined) {
+								openFileInTab(node.path, file.content);
+							}
+						});
+					} else {
+						// Monaco not ready, queue the file opening
+						window.__PENDING_OPEN__ = { filePath: node.path, content: '' };
+						window.dispatchEvent(new Event('barge:pending-open'));
+					}
+				});
+			}
+			
+			return el;
+		}
 
-		function renderTree(root, tree, state) {
+		function renderTree(root, tree) {
 			const fileTreeEl = document.getElementById('fileTree');
 			fileTreeEl.innerHTML = '';
-			const rootEl = document.createElement('div'); rootEl.className = 'item'; rootEl.textContent = root; fileTreeEl.appendChild(rootEl);
-			rootEl.addEventListener('click', () => { selectedDirectoryPath = root; highlightSelectedDir(rootEl); });
-			const children = document.createElement('div'); children.className = 'children'; fileTreeEl.appendChild(children);
-			for (const node of tree) children.appendChild(renderNode(node, state));
-			// Expand root if previously expanded or by default when no state
-			const shouldExpandRoot = !state || !state.expandedPaths || state.expandedPaths.has(root) || state.expandedPaths.size === 0;
-			children.style.display = shouldExpandRoot ? 'block' : 'none';
-			// Restore selection if available, otherwise select root
-			selectedDirectoryPath = state?.selectedPath || root;
-			highlightSelectedDir(state?.selectedPath ? fileTreeEl.querySelector(`.item[data-path="${CSS.escape(state.selectedPath)}"]`) || rootEl : rootEl);
+			
+			// Create root element
+			const rootEl = document.createElement('div'); 
+			rootEl.className = 'item'; 
+			rootEl.textContent = root; 
+			fileTreeEl.appendChild(rootEl);
+			rootEl.addEventListener('click', () => { 
+				selectedDirectoryPath = root; 
+				highlightSelectedDir(rootEl); 
+			});
+			
+			// Create children container for root
+			const children = document.createElement('div'); 
+			children.className = 'children'; 
+			children.style.display = 'block'; // Show root children by default
+			fileTreeEl.appendChild(children);
+			
+			// Add all tree nodes
+			for (const node of tree) {
+				const nodeContainer = renderNode(node);
+				children.appendChild(nodeContainer);
+			}
+			
 			attachTreeContextMenu(fileTreeEl);
 			enableTreeKeyboard(fileTreeEl);
 			enableTreeDnD(fileTreeEl);
 		}
-		// Expose renderer functions for early callers
-		window.bargeRenderTree = renderTree;
 
-		// Incremental file tree update helpers
-		function cssEscapeSafe(s) { try { return CSS.escape(s); } catch { return (s || '').replace(/[^a-zA-Z0-9_-]/g, '_'); } }
-
-		function getChildrenContainerForDir(dirPath) {
-			const tree = document.getElementById('fileTree');
-			if (!tree) return null;
-			if (dirPath === currentWorkspaceRoot) return tree.querySelector(':scope > .children');
-			const dirItem = tree.querySelector(`.item[data-path="${cssEscapeSafe(dirPath)}"]`);
-			if (!dirItem) return null;
-			const sib = dirItem.nextSibling;
-			return (sib && sib.classList && sib.classList.contains('children')) ? sib : null;
-		}
-
-		function compareNodePlacement(existingEl, newType, newName) {
-			let existingType = 'file';
-			let existingName = '';
-			const item = existingEl.classList.contains('item') ? existingEl : existingEl.querySelector(':scope > .item');
-			if (item) {
-				existingName = (item.querySelector('span')?.textContent || '').trim();
-				const children = item.nextSibling;
-				existingType = (children && children.classList && children.classList.contains('children')) ? 'dir' : 'file';
-			}
-			if (existingType !== newType) return existingType === 'dir' ? -1 : 1;
-			return existingName.localeCompare(newName);
-		}
-
-		function insertSorted(container, element, type, name) {
-			const kids = Array.from(container.children);
-			for (let i = 0; i < kids.length; i++) {
-				const cmp = compareNodePlacement(kids[i], type, name);
-				if (cmp > 0) { container.insertBefore(element, kids[i]); return; }
-			}
-			container.appendChild(element);
-		}
-
-		function createNodeElement(node) {
-			const el = document.createElement('div'); el.className = 'item'; el.innerHTML = `${iconSvg(node.type)} <span>${node.name}</span>`; el.dataset.path = node.path || ''; el.draggable = true;
-			if (node.type === 'file') {
-				el.addEventListener('click', async () => { const res = await window.bridge.readFileByPath(node.path); openInTabSafe(node.path, res?.content ?? ''); updateEmptyState(); });
-				return el;
-			} else {
-				const children = document.createElement('div'); children.className = 'children'; children.style.display = 'none';
-				let expanded = false;
-				el.addEventListener('click', () => { expanded = !expanded; children.style.display = expanded ? 'block' : 'none'; selectedDirectoryPath = node.path; highlightSelectedDir(el); });
-				const wrap = document.createElement('div'); wrap.appendChild(el); wrap.appendChild(children); return wrap;
-			}
-		}
-
-		function removePathFromTree(targetPath) {
-			const tree = document.getElementById('fileTree'); if (!tree) return;
-			const item = tree.querySelector(`.item[data-path="${cssEscapeSafe(targetPath)}"]`);
-			if (!item) return;
-			const maybeWrap = item.parentElement;
-			if (maybeWrap && maybeWrap.firstChild === item && maybeWrap.children.length === 2 && maybeWrap.lastChild.classList.contains('children')) {
-				maybeWrap.remove();
-			} else {
-				item.remove();
-			}
-		}
-
-		function updatePathDatasetRecursive(rootEl, oldPrefix, newPrefix) {
-			if (!rootEl) return;
-			const items = rootEl.querySelectorAll('.item');
-			items.forEach((it) => {
-				const p = it.dataset.path;
-				if (p && p.startsWith(oldPrefix)) {
-					const rest = p.slice(oldPrefix.length);
-					it.dataset.path = newPrefix + rest;
-					const span = it.querySelector('span');
-					if (span && span.textContent && span.textContent === (oldPrefix + rest).split('/').pop()) {
-						span.textContent = (newPrefix + rest).split('/').pop();
-					}
-				}
-			});
-		}
-
-		function renamePathInTree(oldPath, newPath) {
-			const tree = document.getElementById('fileTree'); if (!tree) return;
-			const item = tree.querySelector(`.item[data-path="${cssEscapeSafe(oldPath)}"]`);
-			if (!item) return;
-			const newName = newPath.split('/').pop();
-			item.dataset.path = newPath;
-			const span = item.querySelector('span'); if (span) span.textContent = newName;
-			const sibling = item.nextSibling;
-			if (sibling && sibling.classList.contains('children')) {
-				updatePathDatasetRecursive(sibling, oldPath + '/', newPath + '/');
-			}
-			// Re-sort within parent container
-			const parentContainer = item.parentElement && item.parentElement.classList.contains('children') ? item.parentElement : (item.parentElement?.parentElement?.classList.contains('children') ? item.parentElement.parentElement : null);
-			if (parentContainer) {
-				const wrap = (sibling && sibling.classList.contains('children')) ? item.parentElement : item;
-				wrap.remove();
-				insertSorted(parentContainer, wrap, (sibling ? 'dir' : 'file'), newName);
-			}
-		}
-
-		function movePathInTree(oldPath, newPath) {
-			const tree = document.getElementById('fileTree'); if (!tree) return;
-			const item = tree.querySelector(`.item[data-path="${cssEscapeSafe(oldPath)}"]`);
-			if (!item) return;
-			const isDir = !!(item.nextSibling && item.nextSibling.classList && item.nextSibling.classList.contains('children'));
-			const newParentDir = newPath.split('/').slice(0, -1).join('/');
-			const container = getChildrenContainerForDir(newParentDir);
-			if (!container) { refreshTree(); return; }
-			const wrap = (isDir && item.parentElement && item.parentElement.firstChild === item) ? item.parentElement : item;
-			const newName = newPath.split('/').pop();
-			item.dataset.path = newPath;
-			const span = item.querySelector('span'); if (span) span.textContent = newName;
-			if (isDir) updatePathDatasetRecursive(item.nextSibling, oldPath + '/', newPath + '/');
-			wrap.remove();
-			insertSorted(container, wrap, isDir ? 'dir' : 'file', newName);
-			container.style.display = 'block';
-		}
-
-		function createPathInTree(targetPath, type) {
-			const parentDir = targetPath.split('/').slice(0, -1).join('/');
-			const container = getChildrenContainerForDir(parentDir);
-			if (!container) { refreshTree(); return; }
-			const node = { type, name: targetPath.split('/').pop(), path: targetPath };
-			const el = createNodeElement(node);
-			insertSorted(container, el, type, node.name);
-			container.style.display = 'block';
-		}
-
-		function handleFsChanged(payload) {
-			if (!payload) return;
-			switch (payload.kind) {
-				case 'mkdir': createPathInTree(payload.path, 'dir'); break;
-				case 'create': createPathInTree(payload.path, 'file'); break;
-				case 'rename': renamePathInTree(payload.oldPath, payload.path); break;
-				case 'move': movePathInTree(payload.oldPath, payload.path); break;
-				case 'delete': removePathFromTree(payload.path); break;
-			}
-		}
-
-		function enableTreeKeyboard(container) {
-			container.tabIndex = 0;
-			container.addEventListener('keydown', async (e) => {
-				if (e.key === 'F2') {
-					e.preventDefault();
-					const sel = container.querySelector('.item.selected');
-					if (sel) renameFlow(computePathFromItem(sel));
-				}
-				if (e.key === 'Delete') {
-					e.preventDefault();
-					const sel = container.querySelector('.item.selected');
-					if (sel) deleteFlow(computePathFromItem(sel));
-				}
-				if (e.ctrlKey && e.key.toLowerCase() === 'n') {
-					e.preventDefault();
-					if (e.shiftKey) window.createFolderFlow(); else sidebarNewFile.click();
-				}
-			});
-		}
-
-		function enableTreeDnD(container) {
-			container.addEventListener('dragstart', (e) => {
-				const item = e.target.closest('.item');
-				if (!item) return; e.dataTransfer.setData('text/barge-path', computePathFromItem(item));
-			});
-			container.addEventListener('dragover', (e) => {
-				e.preventDefault();
-			});
-			container.addEventListener('drop', async (e) => {
-				e.preventDefault();
-				const src = e.dataTransfer.getData('text/barge-path');
-				const targetItem = e.target.closest('.item');
-				if (!src || !targetItem) return;
-				const targetPath = computePathFromItem(targetItem);
-				const targetDir = targetItem.classList.contains('item') && targetItem.nextSibling?.classList?.contains('children') ? targetPath : pathDirname(targetPath);
-				if (!targetDir) return;
-				const res = await window.bridge.movePath({ sourcePath: src, targetDir });
-				if (!res?.ok) { console.error('Move failed', res?.error); return; }
-				await refreshTree();
-			});
-		}
-
-		function pathDirname(p) { return p.split('/').slice(0, -1).join('/'); }
-
-		function attachTreeContextMenu(container) {
-			container.addEventListener('contextmenu', (e) => {
-				e.preventDefault();
-				const target = e.target.closest('.item');
-				if (!target) return;
-				const itemPath = computePathFromItem(target);
-				const isDir = !!(target.nextSibling && target.nextSibling.classList && target.nextSibling.classList.contains('children'));
-				const items = [];
-				if (isDir) {
-					items.push(
-						{ label: 'Open', action: async () => {
-							// toggle expand like click handler
-							const children = target.nextSibling; if (children) { const expanded = children.style.display === 'block'; children.style.display = expanded ? 'none' : 'block'; selectedDirectoryPath = itemPath; highlightSelectedDir(target); }
-						}},
-						{ label: 'New File', action: async () => {
-							hideAnyModal();
-							const name = await showInputModal({ title: 'New File', label: 'File name', placeholder: 'e.g. index.js', okText: 'Create File', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFile({ dir: itemPath, name: val }); if (!res?.ok) return res?.error || 'Failed to create file'; return ''; } });
-							if (!name) return; await refreshTree(); const created = itemPath + '/' + name; const file = await window.bridge.readFileByPath(created); openInTabSafe(created, file?.content ?? '');
-						}},
-						{ label: 'New Folder', action: async () => {
-							hideAnyModal();
-							const name = await showInputModal({ title: 'New Folder', label: 'Folder name', placeholder: 'e.g. src', okText: 'Create Folder', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFolder({ root: itemPath, name: val }); if (!res?.ok) return res?.error || 'Failed to create folder'; return ''; } });
-							if (!name) return; /* incremental update handled by fs:changed */
-						}}
-					);
-				} else {
-					items.push({ label: 'Open', action: async () => { const res = await window.bridge.readFileByPath(itemPath); openInTabSafe(itemPath, res?.content ?? ''); }});
-				}
-				items.push({ label: 'Rename', action: () => renameFlow(itemPath) });
-				items.push({ label: 'Delete', action: () => deleteFlow(itemPath) });
-				showContextMenu(e.pageX, e.pageY, items);
-			}, false);
-		}
-
-		function computePathFromItem(itemEl) {
-			// Walk up from itemEl to reconstruct path text from labels
-			// We already render nodes with their full paths in event handlers; for reliability,
-			// embed data-path on elements when creating them
-			return itemEl.dataset?.path || (itemEl.textContent || '').trim();
-		}
-
-		function showContextMenu(x, y, items) {
-			let menu = document.getElementById('treeContext');
-			if (!menu) {
-				menu = document.createElement('div');
-				menu.id = 'treeContext';
-				menu.style.position = 'fixed';
-				menu.style.zIndex = '20000';
-				menu.style.minWidth = '160px';
-				menu.style.background = 'rgba(17,21,30,0.98)';
-				menu.style.border = '1px solid rgba(153,174,206,0.35)';
-				menu.style.borderRadius = '10px';
-				menu.style.boxShadow = '0 18px 60px rgba(3,8,20,0.5)';
-				document.body.appendChild(menu);
-			}
-			menu.innerHTML = '';
-			items.forEach(it => {
-				const btn = document.createElement('button');
-				btn.className = 'menu-item';
-				btn.style.width = '100%';
-				btn.textContent = it.label;
-				btn.addEventListener('click', () => { hideMenu(); it.action(); });
-				menu.appendChild(btn);
-			});
-			menu.style.left = x + 'px';
-			menu.style.top = y + 'px';
-			menu.style.display = 'block';
-			function hideMenu() { if (menu) menu.style.display = 'none'; document.removeEventListener('click', hideOnClick); }
-			function hideOnClick(ev) { if (!menu.contains(ev.target)) hideMenu(); }
-			document.addEventListener('click', hideOnClick, { once: true });
-		}
-
-		async function renameFlow(oldPath) {
-			const baseLabel = (oldPath.split('/').pop() || '').trim();
-			const newName = await showInputModal({ title: 'Rename', label: 'New name', placeholder: baseLabel, okText: 'Rename', validate: (v) => {
-				if (!v) return 'Name is required';
-				if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|';
-				return '';
-			}, onSubmit: async (val) => {
-				const res = await window.bridge.renamePath({ oldPath, newName: val });
-				if (!res?.ok) return res?.error || 'Failed to rename';
-				return '';
-			}});
-			if (!newName) return;
-			/* incremental update handled by fs:changed */
-		}
-
-		async function deleteFlow(targetPath) {
-			const confirmed = await showInputModal({ title: 'Delete', label: 'Type DELETE to confirm', okText: 'Delete', validate: (v) => {
-				if (v !== 'DELETE') return 'Please type DELETE to confirm';
-				return '';
-			}, onSubmit: async () => {
-				const res = await window.bridge.deletePath({ target: targetPath });
-				if (!res?.ok) return res?.error || 'Failed to delete';
-				return '';
-			}});
-			if (!confirmed) return;
-			/* incremental update handled by fs:changed */
-		}
-
-		function iconSvg(kind) { if (kind === 'dir') return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M3 7h6l2 2h10v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="#8aa2c4"/></svg>'; return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="5" y="3" width="14" height="18" rx="2" ry="2" stroke="#9aa2b2"/></svg>'; }
-
-		function renderNode(node, state) {
-			const el = document.createElement('div'); el.className = 'item'; el.innerHTML = `${iconSvg(node.type)} <span>${node.name}</span>`; el.dataset.path = node.path || ''; el.draggable = true;
-			if (node.type === 'file') { el.addEventListener('click', async () => { const res = await window.bridge.readFileByPath(node.path); openInTabSafe(node.path, res?.content ?? ''); updateEmptyState(); }); }
-			else if (node.type === 'dir') {
-				const children = document.createElement('div'); children.className = 'children';
-				let expanded = !!(state && state.expandedPaths && state.expandedPaths.has(node.path));
-				el.addEventListener('click', () => { expanded = !expanded; children.style.display = expanded ? 'block' : 'none'; selectedDirectoryPath = node.path; highlightSelectedDir(el); });
-				for (const child of node.children) children.appendChild(renderNode(child, state)); children.style.display = expanded ? 'block' : 'none'; const wrap = document.createElement('div'); wrap.appendChild(el); wrap.appendChild(children); return wrap;
-			}
-			return el;
-		}
 		function highlightSelectedDir(el) {
 			document.querySelectorAll('.file-tree .item.selected').forEach(n => n.classList.remove('selected'));
 			el.classList.add('selected');
 		}
 
+		function attachTreeContextMenu(container) {
+			// Basic context menu implementation
+			container.addEventListener('contextmenu', (e) => {
+				e.preventDefault();
+				// Add context menu logic here if needed
+			});
+		}
+
+		function enableTreeKeyboard(container) {
+			// Basic keyboard navigation
+			container.addEventListener('keydown', (e) => {
+				// Add keyboard navigation logic here if needed
+			});
+		}
+
+		function enableTreeDnD(container) {
+			// Basic drag and drop
+			container.addEventListener('dragover', (e) => {
+				e.preventDefault();
+			});
+		}
+
 		function getOrCreateModel(filePath, content) { 
+			if (!monacoRef) {
+				console.error('Monaco not available yet');
+				return null;
+			}
+			
 			let model = modelsByPath.get(filePath); 
 			if (!model) { 
 				const uri = monacoRef.Uri.file(filePath); 
@@ -987,279 +1014,549 @@ if (!window.__MONACO_BOOT__) {
 		}
 
 		function openFileInTab(filePath, content) {
-			let tab = openTabs.find(t => t.path === filePath);
+			console.log('openFileInTab called with:', filePath);
 			const model = getOrCreateModel(filePath, content);
-			if (!tab) { tab = { path: filePath, title: basename(filePath), dirty: false, modelUri: model.uri.toString() }; openTabs.push(tab); const tabEl = document.createElement('div'); tabEl.className = 'tab'; const titleEl = document.createElement('div'); titleEl.className = 'title'; titleEl.textContent = tab.title; const closeEl = document.createElement('div'); closeEl.className = 'close'; closeEl.textContent = '×'; closeEl.addEventListener('click', (e) => { e.stopPropagation(); closeTab(filePath); updateEmptyState(); }); tabEl.appendChild(titleEl); tabEl.appendChild(closeEl); tabEl.addEventListener('click', () => { activateTab(filePath); }); tab._el = tabEl; tab._titleEl = titleEl; tabsEl.appendChild(tabEl); }
-			activateTab(filePath);
-			editor.setModel(model);
-			editor.focus();
-			filenameEl.textContent = filePath; langEl.textContent = guessLanguage(filePath); markDirty(filePath, false); updateStatus();
-		}
-		// Expose tab open API for code that runs before Monaco is ready
-		window.bargeOpenFileInTab = openFileInTab;
-
-		function activateTab(filePath) { activeTabPath = filePath; for (const t of openTabs) t._el.classList.toggle('active', t.path === filePath); const model = modelsByPath.get(filePath); if (model) { editor.setModel(model); editor.focus(); } if (settings.autoSave === 'onFocusChange') saveActiveFile(); }
-
-		function markDirty(filePath, isDirty) { if (!filePath) return; const tab = openTabs.find(t => t.path === filePath); if (!tab) return; tab.dirty = isDirty; tab._titleEl.textContent = tab.title + (isDirty ? ' •' : ''); }
-
-		async function saveActiveFile() {
-			if (!activeTabPath) return;
-			const model = modelsByPath.get(activeTabPath);
-			if (!model) return;
-			const content = model.getValue();
-			if (isUntitledPath(activeTabPath)) {
-				const res = await window.bridge.saveAs(content);
-				if (res?.filePath) {
-					const newPath = res.filePath;
-					modelsByPath.delete(activeTabPath);
-					const newModel = monacoRef.editor.createModel(content ?? '', guessLanguage(newPath), monacoRef.Uri.file(newPath));
-					modelsByPath.set(newPath, newModel);
-					editor.setModel(newModel);
-					const tab = openTabs.find(t => t.path === activeTabPath);
-					if (tab) { tab.path = newPath; tab.title = basename(newPath); tab._titleEl.textContent = tab.title; }
-					activeTabPath = newPath;
-					markDirty(activeTabPath, false);
-					updateEmptyState();
-				}
+			if (!model) {
+				console.error('Cannot create model - Monaco not ready');
 				return;
 			}
-			await window.bridge.writeFileByPath({ filePath: activeTabPath, content });
-			markDirty(activeTabPath, false);
-		}
-		// Provide deferred global save for menu binding
-		window.__saveActive = async () => { if (!activeTabPath) { alert('No file to save'); return; } await saveActiveFile(); };
-
-		function handleAutoSave() {
-			if (settings.autoSave === 'afterDelay') {
-				if (!activeTabPath) return;
-				const existing = autosaveTimers.get(activeTabPath);
-				if (existing) clearTimeout(existing);
-				const t = setTimeout(() => { saveActiveFile(); autosaveTimers.delete(activeTabPath); }, settings.autoSaveDelay);
-				autosaveTimers.set(activeTabPath, t);
+			
+			let tab = openTabs.find(t => t.path === filePath);
+			if (!tab) { 
+				console.log('Creating new tab for:', filePath);
+				tab = { path: filePath, title: basename(filePath), dirty: false, modelUri: model.uri.toString() }; 
+				openTabs.push(tab); 
+				const tabEl = document.createElement('div'); 
+				tabEl.className = 'tab'; 
+				const titleEl = document.createElement('div'); 
+				titleEl.className = 'title'; 
+				titleEl.textContent = tab.title; 
+				const closeEl = document.createElement('div'); 
+				closeEl.className = 'close'; 
+				closeEl.textContent = '×'; 
+				closeEl.addEventListener('click', (e) => { 
+					console.log('Close button clicked for:', filePath);
+					e.stopPropagation(); 
+					closeTab(filePath); 
+					updateEmptyState(); 
+				}); 
+				tabEl.appendChild(titleEl); 
+				tabEl.appendChild(closeEl); 
+				tabEl.addEventListener('click', (e) => { 
+					console.log('Tab click event triggered for:', filePath);
+					console.log('Event target:', e.target);
+					console.log('Event currentTarget:', e.currentTarget);
+					console.log('Event bubbles:', e.bubbles);
+					
+					e.preventDefault();
+					e.stopPropagation(); 
+					e.stopImmediatePropagation();
+					
+					console.log('Tab clicked:', filePath); // Debug log
+					activateTab(filePath); 
+				}); 
+				tab._el = tabEl; 
+				tab._titleEl = titleEl; 
+				tabsEl.appendChild(tabEl); 
 			}
+			activateTab(filePath);
+			// Remove duplicate editor.setModel() call - it's already called in activateTab()
+			// editor.setModel(model);
+			// editor.focus();
+			filenameEl.textContent = filePath; 
+			langEl.textContent = guessLanguage(filePath); 
+			markDirty(filePath, false); 
+			updateStatus();
+		}
+
+		function activateTab(filePath) { 
+			console.log('activateTab called with:', filePath);
+			console.log('Current openTabs:', openTabs.map(t => t.path));
+			console.log('activeTabPath before:', activeTabPath);
+			console.log('isUntitledPath:', isUntitledPath(filePath));
+			console.log('settings.autoSave:', settings.autoSave);
+			
+			activeTabPath = filePath; 
+			for (const t of openTabs) {
+				console.log('Setting active for tab:', t.path, 'should be active:', t.path === filePath);
+				t._el.classList.toggle('active', t.path === filePath); 
+			}
+			const model = modelsByPath.get(filePath); 
+			console.log('Model found:', !!model);
+			if (model) { 
+				editor.setModel(model); 
+				editor.focus(); 
+			} 
+			// Don't auto-save untitled files when switching tabs
+			if (settings.autoSave === 'onFocusChange' && !isUntitledPath(filePath)) {
+				console.log('Auto-saving non-untitled file');
+				saveActiveFile(); 
+			} else {
+				console.log('Not auto-saving - either not onFocusChange or untitled file');
+			}
+		}
+
+		function markDirty(filePath, isDirty) { 
+			if (!filePath) return; 
+			const tab = openTabs.find(t => t.path === filePath); 
+			if (!tab) return; 
+			tab.dirty = isDirty; 
+			tab._titleEl.textContent = tab.title + (isDirty ? ' •' : ''); 
 		}
 
 		function closeTab(filePath) {
-			const idx = openTabs.findIndex(t => t.path === filePath);
-			if (idx === -1) return;
-			const tab = openTabs[idx];
-			if (tab.dirty) { const ok = confirm(`${tab.title} has unsaved changes. Close anyway?`); if (!ok) return; }
-			try { const model = modelsByPath.get(filePath); const content = model?.getValue(); closedStack.push({ path: filePath, content }); if (closedStack.length > 50) closedStack.shift(); } catch {}
-			tab._el.remove(); openTabs.splice(idx, 1);
-			const stillUsed = openTabs.some(t => t.path === filePath);
-			if (!stillUsed) { const model = modelsByPath.get(filePath); if (model) { model.dispose(); modelsByPath.delete(filePath); } }
-			if (activeTabPath === filePath) { const next = openTabs[idx] || openTabs[idx - 1]; if (next) { activateTab(next.path); } else { editor.setValue(''); filenameEl.textContent = ''; activeTabPath = null; updateStatus(); } }
-			updateEmptyState();
-		}
-
-		function updateStatus() { const pos = editor.getPosition(); if (!pos) return; cursorPosEl.textContent = `Ln ${pos.lineNumber}, Col ${pos.column}`; }
-
-		function guessLanguage(filePath) { 
-			const name = (filePath.split('/').pop() || '').toLowerCase(); 
-			const ext = name.includes('.') ? name.split('.').pop() : ''; 
-			const map = { 
-				js: 'javascript', 
-				jsx: 'javascript',
-				ts: 'typescript', 
-				tsx: 'typescript',
-				json: 'json', 
-				css: 'css', 
-				scss: 'scss',
-				sass: 'scss',
-				less: 'less',
-				html: 'html', 
-				htm: 'html',
-				xml: 'xml',
-				md: 'markdown', 
-				markdown: 'markdown',
-				py: 'python', 
-				java: 'java', 
-				c: 'c', 
-				cpp: 'cpp', 
-				cxx: 'cpp',
-				cc: 'cpp',
-				h: 'c',
-				hpp: 'cpp',
-				rs: 'rust', 
-				go: 'go', 
-				sh: 'shell',
-				bash: 'shell',
-				zsh: 'shell',
-				fish: 'shell', 
-				yml: 'yaml', 
-				yaml: 'yaml',
-				php: 'php',
-				rb: 'ruby',
-				swift: 'swift',
-				kt: 'kotlin',
-				scala: 'scala',
-				r: 'r',
-				sql: 'sql',
-				dockerfile: 'dockerfile'
-			}; 
-			return map[ext] || 'plaintext'; 
-		}
-
-		function basename(p) { return p.split('/').pop(); }
-
-		async function loadExtensions() { try { const list = await window.bridge.listExtensions(); for (const ext of list) { try { const mod = await import(ext.mainUrl); await mod.activate?.({ editor, monaco: monacoRef, commands: { register: window.bridge.registerCommand, execute: window.bridge.executeCommand, }, api: { openFileInTab, }, }); } catch (e) { console.error('Extension failed', ext, e); } } } catch (e) { console.error('Extensions load failed', e); } }
-
-		function highlightPreview(line, matches) { if (!matches?.length) return line; let html = ''; let last = 0; for (const m of matches) { html += escapeHtml(line.slice(last, m.start)); html += `<span class=\"result-highlight\">${escapeHtml(line.slice(m.start, m.end))}</span>`; last = m.end; } html += escapeHtml(line.slice(last)); return html; }
-		function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])); }
-
-		safeBind(cmdBackdrop, 'click', closeCmdPalette);
-		safeBind(cmdInput, 'input', () => filterCommands(cmdInput.value));
-		safeBind(cmdInput, 'keydown', (e) => {
-			if (e.key === 'Escape') { e.preventDefault(); closeCmdPalette(); return; }
-			if (e.key === 'ArrowDown') { e.preventDefault(); if (cmdFiltered.length) { cmdSelected = Math.min(cmdSelected + 1, cmdFiltered.length - 1); renderCmdList(cmdFiltered); } return; }
-			if (e.key === 'ArrowUp') { e.preventDefault(); if (cmdFiltered.length) { cmdSelected = Math.max(cmdSelected - 1, 0); renderCmdList(cmdFiltered); } return; }
-			if (e.key === 'Enter') { e.preventDefault(); executeCmd(cmdFiltered[cmdSelected]); return; }
-		});
-
-		menubar?.addEventListener('keydown', (e) => {
-			const target = e.target;
-			const inLabel = target?.classList?.contains('menu-label');
-			const inItem = target?.classList?.contains('menu-item');
-			if (!inLabel && !inItem) return;
-			const currentMenu = target.closest('.menu');
-			const menus = Array.from(menubar.querySelectorAll('.menu'));
-			const items = getMenuItems(currentMenu);
-			const currentIndex = indexOfMenu(currentMenu);
-
-			if (e.key === 'Escape') {
-				e.preventDefault();
-				closeAllMenus();
-				getMenuLabel(currentMenu)?.focus();
+			console.log('closeTab called with:', filePath);
+			console.log('Current openTabs before close:', openTabs.map(t => t.path));
+			console.log('activeTabPath:', activeTabPath);
+			console.log('editor available in closeTab:', !!editor);
+			
+			const tabIndex = openTabs.findIndex(t => t.path === filePath);
+			if (tabIndex === -1) {
+				console.log('Tab not found:', filePath);
 				return;
 			}
-
-			if (inLabel) {
-				switch (e.key) {
-					case 'ArrowRight': e.preventDefault(); focusMenuByIndex(currentIndex + 1); break;
-					case 'ArrowLeft': e.preventDefault(); focusMenuByIndex(currentIndex - 1); break;
-					case 'Home': e.preventDefault(); focusMenuByIndex(0); break;
-					case 'End': e.preventDefault(); focusMenuByIndex(menus.length - 1); break;
-					case 'ArrowDown':
-					case 'Enter':
-					case ' ': {
-						e.preventDefault();
-						openMenu(currentMenu);
-						const first = items[0];
-						first?.focus();
-						break;
-					}
-				}
-				return;
+			const tab = openTabs[tabIndex];
+			
+			// Add to closed stack for reopening
+			const model = modelsByPath.get(filePath);
+			if (model) {
+				closedStack.push({
+					path: filePath,
+					content: model.getValue()
+				});
 			}
-
-			if (inItem) {
-				const idx = items.indexOf(target);
-				switch (e.key) {
-					case 'ArrowDown': e.preventDefault(); (items[idx + 1] || items[0])?.focus(); break;
-					case 'ArrowUp': e.preventDefault(); (items[idx - 1] || items[items.length - 1])?.focus(); break;
-					case 'Home': e.preventDefault(); items[0]?.focus(); break;
-					case 'End': e.preventDefault(); items[items.length - 1]?.focus(); break;
-					case 'ArrowRight': e.preventDefault(); focusMenuByIndex(currentIndex + 1); break;
-					case 'ArrowLeft': e.preventDefault(); focusMenuByIndex(currentIndex - 1); break;
-					case 'Enter':
-					case ' ': e.preventDefault(); target.click(); break;
-					case 'Tab': {
-						e.preventDefault();
-						if (e.shiftKey) { (items[idx - 1] || items[items.length - 1] || getMenuLabel(currentMenu))?.focus(); }
-						else { (items[idx + 1] || items[0] || getMenuLabel(currentMenu))?.focus(); }
-						break;
-					}
-				}
+			
+			tab._el.remove();
+			openTabs.splice(tabIndex, 1);
+			console.log('openTabs after close:', openTabs.map(t => t.path));
+			
+			if (model) {
+				model.dispose();
+				modelsByPath.delete(filePath);
 			}
-		});
-
-		// Defer file menu actions until Monaco is ready
-		window.__saveAllTabs = async () => {
-			for (const t of openTabs) {
-				const model = modelsByPath.get(t.path);
-				if (model) {
-					const content = model.getValue();
-					if (isUntitledPath(t.path)) {
-						const res = await window.bridge.saveAs(content);
-						if (res?.filePath) {
-							const newPath = res.filePath;
-							modelsByPath.delete(t.path);
-							const newModel = monacoRef.editor.createModel(content ?? '', guessLanguage(newPath), monacoRef.Uri.file(newPath));
-							modelsByPath.set(newPath, newModel);
-							editor.setModel(newModel);
-							const tab = openTabs.find(tab => tab.path === t.path);
-							if (tab) { tab.path = newPath; tab.title = basename(newPath); tab._titleEl.textContent = tab.title; }
-							markDirty(newPath, false);
-						}
+			if (activeTabPath === filePath) {
+				console.log('Closing active tab, switching to next tab or clearing editor');
+				if (openTabs.length > 0) {
+					const nextTab = openTabs[Math.min(tabIndex, openTabs.length - 1)];
+					console.log('Switching to next tab:', nextTab.path);
+					activateTab(nextTab.path);
+				} else {
+					console.log('No more tabs, clearing editor directly');
+					// Clear editor directly instead of calling clearEditor()
+					if (editor) {
+						console.log('Clearing editor directly');
+						editor.setValue('');
+						editor.updateOptions({ language: 'plaintext' });
+						console.log('Editor cleared directly');
 					} else {
-						await window.bridge.writeFileByPath({ filePath: t.path, content });
-						markDirty(t.path, false);
+						console.log('Editor not available for direct clearing');
+					}
+					const filenameEl = document.getElementById('filename');
+					if (filenameEl) {
+						filenameEl.textContent = '';
+						console.log('Filename cleared directly');
+					}
+					activeTabPath = null;
+				}
+			}
+		}
+
+		// Move clearEditor inside the require callback where editor is accessible
+		function clearEditor() {
+			console.log('clearEditor called');
+			console.log('editor available:', !!editor);
+			console.log('editor type:', typeof editor);
+			if (editor) {
+				console.log('Editor value before clear:', editor.getValue());
+				editor.setValue('');
+				editor.updateOptions({ language: 'plaintext' });
+				console.log('Editor value after clear:', editor.getValue());
+				console.log('Editor cleared');
+			} else {
+				console.log('Editor not available');
+			}
+			const filenameEl = document.getElementById('filename');
+			if (filenameEl) {
+				filenameEl.textContent = '';
+				console.log('Filename cleared');
+			}
+		}
+
+		// Make clearEditor available globally
+		window.clearEditor = clearEditor;
+
+		function closeAllTabs() {
+			// Close all tabs
+			while (openTabs.length > 0) {
+				const tab = openTabs[0];
+				closeTab(tab.path);
+			}
+			// Clear the editor
+			clearEditor();
+			activeTabPath = null;
+			updateEmptyState();
+		}
+
+		// Make closeAllTabs available globally
+		window.__closeAllTabs = closeAllTabs;
+
+		function saveActiveFile() {
+			console.log('saveActiveFile called with activeTabPath:', activeTabPath);
+			console.log('autoSave setting:', settings.autoSave);
+			if (!activeTabPath || !editor) return;
+			
+			const content = editor.getValue();
+			if (isUntitledPath(activeTabPath)) {
+				console.log('Saving untitled file, opening save dialog');
+				// Handle untitled files - show save as dialog
+				window.bridge.saveAs(content).then(res => {
+					if (res?.filePath) {
+						// Update the tab with the new file path
+						const tab = openTabs.find(t => t.path === activeTabPath);
+						if (tab) {
+							const oldPath = tab.path;
+							tab.path = res.filePath;
+							tab.title = basename(res.filePath);
+							tab._titleEl.textContent = tab.title;
+							activeTabPath = res.filePath;
+							
+							// Update the close button event handler to use the new path
+							const closeEl = tab._el.querySelector('.close');
+							if (closeEl) {
+								// Remove old event listener and add new one with correct path
+								closeEl.replaceWith(closeEl.cloneNode(true));
+								const newCloseEl = tab._el.querySelector('.close');
+								newCloseEl.addEventListener('click', (e) => { 
+									console.log('Close button clicked for:', res.filePath);
+									e.stopPropagation(); 
+									closeTab(res.filePath); 
+									updateEmptyState(); 
+								});
+							}
+						}
+						markDirty(activeTabPath, false);
+					}
+				});
+			} else {
+				console.log('Saving existing file:', activeTabPath);
+				// Save existing file using the correct bridge method
+				window.bridge.writeFileByPath({ filePath: activeTabPath, content }).then(success => {
+					if (success) {
+						markDirty(activeTabPath, false);
+						console.log('File saved successfully:', activeTabPath);
+					} else {
+						console.error('Failed to save file:', activeTabPath);
+					}
+				}).catch(error => {
+					console.error('Error saving file:', error);
+				});
+			}
+		}
+
+		async function saveAllTabs() {
+			// Save all dirty tabs
+			const savePromises = [];
+			
+			for (const tab of openTabs) {
+				if (tab.dirty) {
+					const model = modelsByPath.get(tab.path);
+					if (model) {
+						const content = model.getValue();
+						if (isUntitledPath(tab.path)) {
+							// Handle untitled files - each needs to be saved individually
+							const savePromise = window.bridge.saveAs(content).then(res => {
+								if (res?.filePath) {
+									tab.path = res.filePath;
+									tab.title = basename(res.filePath);
+									tab._titleEl.textContent = tab.title;
+									markDirty(tab.path, false);
+									console.log('Untitled file saved as:', res.filePath);
+								}
+							}).catch(error => {
+								console.error('Error saving untitled file:', error);
+							});
+							savePromises.push(savePromise);
+						} else {
+							// Save existing file using the correct bridge method
+							const savePromise = window.bridge.writeFileByPath({ filePath: tab.path, content }).then(success => {
+								if (success) {
+									markDirty(tab.path, false);
+									console.log('File saved successfully:', tab.path);
+								} else {
+									console.error('Failed to save file:', tab.path);
+								}
+							}).catch(error => {
+								console.error('Error saving file:', error);
+							});
+							savePromises.push(savePromise);
+						}
 					}
 				}
 			}
-			updateEmptyState();
-		};
-
-		window.__closeAllTabs = () => {
-			const toClose = [...openTabs];
-			for (const t of toClose) {
-				if (t.dirty) { const ok = confirm(`${t.title} has unsaved changes. Close anyway?`); if (!ok) return; }
-				try { const model = modelsByPath.get(t.path); const content = model?.getValue(); closedStack.push({ path: t.path, content }); if (model) { model.dispose(); modelsByPath.delete(t.path); } } catch {}
-				try { t._el?.remove(); } catch {}
+			
+			// Wait for all saves to complete
+			if (savePromises.length > 0) {
+				try {
+					await Promise.all(savePromises);
+					console.log('All files saved successfully');
+				} catch (error) {
+					console.error('Some files failed to save:', error);
+				}
+			} else {
+				console.log('No dirty files to save');
 			}
-			openTabs = [];
-			activeTabPath = null;
-			editor.setValue('');
-			filenameEl.textContent = '';
-			updateEmptyState();
-		};
+		}
 
-		window.__reopenClosedTab = () => {
+		function reopenClosedTab() {
 			if (closedStack.length === 0) return;
 			const last = closedStack.pop();
 			openFileInTab(last.path, last.content ?? '');
 			updateEmptyState();
-		};
-		// Flush any pending menu actions registered before editor was ready
-		(async () => {
-			try { if (window.__PENDING_SAVE_ACTIVE__) { delete window.__PENDING_SAVE_ACTIVE__; await window.__saveActive(); } } catch {}
-			try { if (window.__PENDING_SAVE_ALL__) { delete window.__PENDING_SAVE_ALL__; await window.__saveAllTabs(); } } catch {}
-			try { if (window.__PENDING_CLOSE_ALL__) { delete window.__PENDING_CLOSE_ALL__; window.__closeAllTabs(); } } catch {}
-			try { if (window.__PENDING_REOPEN_CLOSED__) { delete window.__PENDING_REOPEN_CLOSED__; window.__reopenClosedTab(); } } catch {}
-		})();
-	});
-}
-
-async function ensureTerminal() {
-	if (!termInstance) {
-		// Make sure xterm is available
-		if (!window.Terminal && typeof ensureXtermLoaded === 'function') {
-			const ok = await ensureXtermLoaded();
-			if (!ok) { console.error('xterm failed to load'); return; }
 		}
-		const TerminalCtor = window.Terminal;
-		if (!TerminalCtor) { console.error('Terminal is not defined'); return; }
-		termInstance = new TerminalCtor({ convertEol: true, cursorBlink: true, theme: { background: '#0b0d12' } });
-		termInstance.open(document.getElementById('terminal'));
-		const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || undefined);
-		if (!created || !created.id) { console.error('Terminal create failed', created); return; }
-		termId = created.id;
-		window.bridge.terminal.onData((p) => { if (p.id === termId) termInstance.write(p.data); });
-		termInstance.onData((data) => { if (termId) window.bridge.terminal.write(termId, data); });
-		const applyResize = () => {
-			const el = document.getElementById('terminal');
-			if (!el || !termInstance) return;
-			const dims = termInstance._core?._renderService?._renderer?._charSizeService;
-			const cellW = (dims && dims.width) ? dims.width : 9;
-			const cellH = (dims && dims.height) ? dims.height : 18;
-			const cols = Math.max(20, Math.floor(el.clientWidth / cellW));
-			const rows = Math.max(5, Math.floor(el.clientHeight / cellH));
-			// Resize both frontend (xterm) and backend (pty)
-			try { termInstance.resize(cols, rows); } catch {}
-			window.bridge.terminal.resize(termId, cols, rows);
-		};
-		new ResizeObserver(() => { applyResize(); }).observe(document.getElementById('terminal'));
-		// Force an initial resize and prompt redraw
-		setTimeout(() => { applyResize(); termInstance.focus(); window.bridge.terminal.write(termId, '\r'); }, 0);
-	}
-}
+
+		// Make functions available globally
+		window.__saveActive = saveActiveFile;
+		window.__saveAllTabs = saveAllTabs;
+		window.__reopenClosedTab = reopenClosedTab;
+
+		function updateStatus() { 
+			const pos = editor.getPosition(); 
+			if (!pos) return; 
+			cursorPosEl.textContent = `Ln ${pos.lineNumber}, Col ${pos.column}`; 
+		}
+
+		function guessLanguage(filePath) {
+			const ext = filePath.split('.').pop()?.toLowerCase();
+			const langMap = {
+				'js': 'javascript', 'jsx': 'javascript', 'ts': 'typescript', 'tsx': 'typescript',
+				'py': 'python', 'rb': 'ruby', 'go': 'go', 'rs': 'rust', 'java': 'java',
+				'cpp': 'cpp', 'c': 'c', 'cs': 'csharp', 'php': 'php', 'swift': 'swift',
+				'kt': 'kotlin', 'scala': 'scala', 'clj': 'clojure', 'hs': 'haskell',
+				'html': 'html', 'htm': 'html', 'xml': 'xml', 'svg': 'xml',
+				'css': 'css', 'scss': 'scss', 'sass': 'sass', 'less': 'less',
+				'json': 'json', 'yaml': 'yaml', 'yml': 'yaml', 'toml': 'toml',
+				'md': 'markdown', 'markdown': 'markdown', 'rst': 'restructuredtext',
+				'sql': 'sql', 'sh': 'shell', 'bash': 'shell', 'zsh': 'shell', 'fish': 'shell',
+				'dockerfile': 'dockerfile', 'makefile': 'makefile', 'cmake': 'cmake',
+				'ini': 'ini', 'conf': 'ini', 'cfg': 'ini', 'properties': 'properties',
+				'log': 'log', 'txt': 'plaintext', 'text': 'plaintext'
+			};
+			return langMap[ext] || 'plaintext';
+		}
+
+		function basename(p) { return p.split('/').pop(); }
+
+		// Add missing event listeners
+		window.addEventListener('barge:pending-open', () => {
+			if (window.__PENDING_OPEN__) {
+				const p = window.__PENDING_OPEN__;
+				// Only open file if Monaco is ready
+				if (monacoRef) {
+					openFileInTab(p.filePath, p.content);
+					window.__PENDING_OPEN__ = null;
+				} else {
+					// Monaco still not ready, keep it pending
+					console.log('Monaco not ready, keeping file pending:', p.filePath);
+					// Don't clear the pending file, keep it for when Monaco is ready
+				}
+			}
+		});
+
+		// Add Monaco ready event listener
+		window.addEventListener('barge:monaco-ready', () => {
+			console.log('Monaco is ready, processing pending files...');
+			// Process any pending files now that Monaco is ready
+			if (window.__PENDING_OPEN__) {
+				const p = window.__PENDING_OPEN__;
+				// Get the actual file content
+				window.bridge.readFileByPath(p.filePath).then(file => {
+					if (file && file.content !== undefined) {
+						openFileInTab(p.filePath, file.content);
+					}
+				});
+				window.__PENDING_OPEN__ = null;
+			}
+		});
+
+		// Set up bridge event listeners
+		window.bridge?.onFolderOpened?.((payload) => { 
+			currentWorkspaceRoot = payload.root; 
+			renderTree(payload.root, payload.tree); 
+			clearEditor(); 
+			updateEmptyState(); 
+		});
+		
+		window.bridge?.onFileOpened?.((payload) => { 
+			openFileInTab(payload.filePath, payload.content); 
+			updateEmptyState(); 
+		});
+
+		// Make functions available globally
+		window.bargeRenderTree = renderTree;
+		window.bargeOpenFileInTab = openFileInTab;
+
+		// Add createUntitled function inside the require callback
+		function createUntitled() {
+			const name = `Untitled-${untitledCounter++}.txt`;
+			// Create a new untitled file directly without any dialog
+			if (monacoRef) {
+				// Monaco is ready, open file directly
+				openFileInTab(name, '');
+			} else {
+				// Monaco not ready, queue the file opening
+				window.__PENDING_OPEN__ = { filePath: name, content: '' };
+				window.dispatchEvent(new Event('barge:pending-open'));
+			}
+			updateEmptyState();
+		}
+
+		// Make createUntitled available globally
+		window.createUntitled = createUntitled;
+
+		// Get DOM elements that are needed by the functions
+		const editorContainer = document.getElementById('editor');
+		const filenameEl = document.getElementById('filename');
+		const fileTreeEl = document.getElementById('fileTree');
+		const tabsEl = document.getElementById('tabs');
+		const cursorPosEl = document.getElementById('cursorPos');
+		const langEl = document.getElementById('lang');
+
+		// Initialize Monaco Editor
+		if (!window.__MONACO_BOOT__) {
+			window.__MONACO_BOOT__ = true;
+			require(['vs/editor/editor.main'], function () {
+				monacoRef = window.monaco;
+
+				// Define custom themes that match our app
+				monacoRef.editor.defineTheme('barge-light', {
+					base: 'vs',
+					inherit: true,
+					rules: [
+						{ token: 'comment', foreground: '6b7280', fontStyle: 'italic' },
+						{ token: 'keyword', foreground: '7c3aed', fontStyle: 'bold' },
+						{ token: 'string', foreground: '059669' },
+						{ token: 'number', foreground: 'dc2626' },
+						{ token: 'regexp', foreground: 'ea580c' },
+						{ token: 'type', foreground: '2563eb' },
+						{ token: 'class', foreground: '7c3aed' },
+						{ token: 'function', foreground: '0891b2' },
+						{ token: 'variable', foreground: '374151' },
+						{ token: 'constant', foreground: 'dc2626' },
+						{ token: 'operator', foreground: '374151' },
+						{ token: 'delimiter', foreground: '6b7280' },
+						{ token: 'tag', foreground: 'dc2626' },
+						{ token: 'attribute.name', foreground: '7c3aed' },
+						{ token: 'attribute.value', foreground: '059669' }
+					],
+					colors: {
+						'editor.background': '#f8fafc',
+						'editor.foreground': '#0f172a',
+						'editor.lineHighlightBackground': '#f1f5f9',
+						'editor.selectionBackground': '#dbeafe',
+						'editor.selectionHighlightBackground': '#e0e7ff',
+						'editorCursor.foreground': '#3b82f6',
+						'editorWhitespace.foreground': '#cbd5e1',
+						'editorIndentGuide.background': '#e2e8f0',
+						'editorIndentGuide.activeBackground': '#cbd5e1',
+						'editorLineNumber.foreground': '#94a3b8',
+						'editorLineNumber.activeForeground': '#64748b',
+						'editorBracketMatch.background': '#e0e7ff',
+						'editorBracketMatch.border': '#3b82f6',
+						'editorGutter.background': '#f8fafc',
+						'editorWidget.background': '#ffffff',
+						'editorWidget.border': '#e2e8f0',
+						'editorSuggestWidget.background': '#ffffff',
+						'editorSuggestWidget.border': '#e2e8f0',
+						'editorSuggestWidget.selectedBackground': '#dbeafe',
+						'editorHoverWidget.background': '#ffffff',
+						'editorHoverWidget.border': '#e2e8f0'
+					}
+				});
+
+				monacoRef.editor.defineTheme('barge-dark', {
+					base: 'vs-dark',
+					inherit: true,
+					rules: [
+						{ token: 'comment', foreground: '6b7280', fontStyle: 'italic' },
+						{ token: 'keyword', foreground: 'a78bfa', fontStyle: 'bold' },
+						{ token: 'string', foreground: '10b981' },
+						{ token: 'number', foreground: 'f87171' },
+						{ token: 'regexp', foreground: 'fb923c' },
+						{ token: 'type', foreground: '60a5fa' },
+						{ token: 'class', foreground: 'a78bfa' },
+						{ token: 'function', foreground: '22d3ee' },
+						{ token: 'variable', foreground: 'e5e7eb' },
+						{ token: 'constant', foreground: 'f87171' },
+						{ token: 'operator', foreground: 'd1d5db' },
+						{ token: 'delimiter', foreground: '9ca3af' },
+						{ token: 'tag', foreground: 'f87171' },
+						{ token: 'attribute.name', foreground: 'a78bfa' },
+						{ token: 'attribute.value', foreground: '10b981' }
+					],
+					colors: {
+						'editor.background': '#0b0d12',
+						'editor.foreground': '#e5e7eb',
+						'editor.lineHighlightBackground': '#0f1115',
+						'editor.selectionBackground': '#1e3a8a',
+						'editor.selectionHighlightBackground': '#1e40af',
+						'editorCursor.foreground': '#3b82f6',
+						'editorWhitespace.foreground': '#374151',
+						'editorIndentGuide.background': '#1f2937',
+						'editorIndentGuide.activeBackground': '#374151',
+						'editorLineNumber.foreground': '#6b7280',
+						'editorLineNumber.activeForeground': '#9ca3af',
+						'editorBracketMatch.background': '#1e40af',
+						'editorBracketMatch.border': '#3b82f6',
+						'editorGutter.background': '#0b0d12',
+						'editorWidget.background': '#1f2937',
+						'editorWidget.border': '#374151',
+						'editorSuggestWidget.background': '#1f2937',
+						'editorSuggestWidget.border': '#374151',
+						'editorSuggestWidget.selectedBackground': '#1e40af',
+						'editorHoverWidget.background': '#1f2937',
+						'editorHoverWidget.border': '#374151'
+					}
+				});
+
+				// Create Monaco editor
+				editor = monacoRef.editor.create(editorContainer, {
+					value: '// Welcome to Barge Editor\n',
+					language: 'javascript',
+					theme: settings.theme === 'light' ? 'barge-light' : 'barge-dark',
+					automaticLayout: true,
+					minimap: { enabled: true },
+					fontFamily: settings.fontFamily,
+					fontSize: settings.fontSize,
+					autoClosingBrackets: 'languageDefined',
+					autoClosingQuotes: 'languageDefined',
+					bracketPairColorization: { enabled: true },
+					matchBrackets: 'always',
+				});
+
+				// Set up editor event listeners
+				editor.onDidChangeCursorPosition(() => updateStatus());
+				editor.onDidChangeModelContent(() => { 
+					markDirty(activeTabPath, true); 
+					// handleAutoSave(); 
+				});
+
+				// Dispatch Monaco ready event
+				window.dispatchEvent(new Event('barge:monaco-ready'));
+				console.log('Monaco editor initialized and ready');
+
+				// Process any pending files now that Monaco is ready
+				if (window.__PENDING_OPEN__) {
+					const p = window.__PENDING_OPEN__;
+					// Get the actual file content
+					window.bridge.readFileByPath(p.filePath).then(file => {
+						if (file && file.content !== undefined) {
+							openFileInTab(p.filePath, file.content);
+						}
+					});
+					window.__PENDING_OPEN__ = null;
+				}
+			});
+		}
+	});
+
+
