@@ -191,13 +191,10 @@ function applySettings() {
 	updateTerminalTheme();
 }
 
-function updateTerminalTheme() {
-	if (!termInstance) return;
-	
+function getTerminalThemeForCurrentSettings() {
 	const isLightTheme = settings.theme === 'light';
-	
 	if (isLightTheme) {
-		termInstance.options.theme = {
+		return {
 			background: 'rgba(245, 247, 251, 0.9)',
 			foreground: '#0f172a',
 			cursor: '#2563eb',
@@ -219,36 +216,50 @@ function updateTerminalTheme() {
 			brightCyan: '#06b6d4',
 			brightWhite: '#ffffff'
 		};
-	} else {
-		termInstance.options.theme = {
-			background: '#0b0d12',
-			foreground: '#ffffff',
-			cursor: '#ffffff',
-			selection: '#264f78',
-			black: '#000000',
-			red: '#cd3131',
-			green: '#0dbc79',
-			yellow: '#e5e510',
-			blue: '#2472c8',
-			magenta: '#bc3fbc',
-			cyan: '#11a8cd',
-			white: '#e5e5e5',
-			brightBlack: '#666666',
-			brightRed: '#f14c4c',
-			brightGreen: '#23d18b',
-			brightYellow: '#f5f543',
-			brightBlue: '#3b8eea',
-			brightMagenta: '#d670d6',
-			brightCyan: '#29b8db',
-			brightWhite: '#ffffff'
-		};
+	}
+	return {
+		background: '#0b0d12',
+		foreground: '#ffffff',
+		cursor: '#ffffff',
+		selection: '#264f78',
+		black: '#000000',
+		red: '#cd3131',
+		green: '#0dbc79',
+		yellow: '#e5e510',
+		blue: '#2472c8',
+		magenta: '#bc3fbc',
+		cyan: '#11a8cd',
+		white: '#e5e5e5',
+		brightBlack: '#666666',
+		brightRed: '#f14c4c',
+		brightGreen: '#23d18b',
+		brightYellow: '#f5f543',
+		brightBlue: '#3b8eea',
+		brightMagenta: '#d670d6',
+		brightCyan: '#29b8db',
+		brightWhite: '#ffffff'
+	};
+}
+
+function updateTerminalTheme() {
+	const theme = getTerminalThemeForCurrentSettings();
+	if (typeof terminals === 'object' && terminals instanceof Map && terminals.size) {
+		for (const rec of terminals.values()) {
+			if (rec?.instance) rec.instance.options.theme = theme;
+		}
+		return;
+	}
+	if (typeof termInstance !== 'undefined' && termInstance) {
+		termInstance.options.theme = theme;
 	}
 }
 
 function updateEmptyState() {
 	const modal = document.getElementById('emptyStateModal');
+	const sidebarWelcome = document.getElementById('sidebarWelcome');
 	const hasAny = openTabs.length > 0 || !!currentWorkspaceRoot;
-	modal?.classList.toggle('hidden', hasAny);
+	modal?.classList.add('hidden');
+	if (sidebarWelcome) sidebarWelcome.style.display = hasAny ? 'none' : 'block';
 }
 
 // Early bootstrap to ensure clicks work even if Monaco hasn't finished loading
@@ -319,7 +330,8 @@ window.addEventListener('DOMContentLoaded', () => {
 	const mEditUndo = document.getElementById('mEditUndo');
 	const mEditRedo = document.getElementById('mEditRedo');
 	const mThemeDark = document.getElementById('mThemeDark');
-	const mThemeLight = document.getElementById('mThemeLight');
+const mThemeLight = document.getElementById('mThemeLight');
+const mViewToggleSidebar = document.getElementById('mViewToggleSidebar');
 	const prefsModal = document.getElementById('prefsModal');
 	const prefFontFamily = document.getElementById('prefFontFamily');
 	const prefFontSize = document.getElementById('prefFontSize');
@@ -439,6 +451,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 	function buildCommands() {
 		cmdItems = [
+			{ id: 'view:toggleSidebar', title: 'View: Toggle Sidebar', hint: 'Ctrl+B', run: () => mViewToggleSidebar?.click() },
 			{ id: 'file:open', title: 'File: Open…', hint: 'Ctrl+O', run: () => mFileOpen?.click() },
 			{ id: 'file:openFolder', title: 'File: Open Folder…', hint: 'Ctrl+K Ctrl+O', run: () => mFileOpenFolder?.click() },
 			{ id: 'file:save', title: 'File: Save', hint: 'Ctrl+S', run: () => mFileSave?.click() },
@@ -489,6 +502,7 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	safeBind(mEditPreferences, 'click', () => { if (typeof openPrefs === 'function') openPrefs(); else setTimeout(() => openPrefs?.(), 100); });
 	safeBind(mThemeDark, 'click', () => { settings.theme = 'dark'; saveSettings(); applySettings(); });
 	safeBind(mThemeLight, 'click', () => { settings.theme = 'light'; saveSettings(); applySettings(); });
+safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.classList.toggle('sidebar-hidden'); saveSettings(); });
 
 	function openPrefs() { prefFontFamily.value = settings.fontFamily; prefFontSize.value = settings.fontSize; prefAutoSave.value = settings.autoSave; prefAutoSaveDelay.value = settings.autoSaveDelay; autoSaveDelayField.style.display = settings.autoSave === 'afterDelay' ? 'grid' : 'none'; prefsModal.classList.remove('hidden'); }
 	function closePrefs() { prefsModal.classList.add('hidden'); }
@@ -555,6 +569,7 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'z') { e.preventDefault(); mViewToggleWordWrap?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); openCmdPalette(); }
 		if (e.ctrlKey && e.key.toLowerCase() === 'n') { e.preventDefault(); mFileNew?.click(); }
+	if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); mViewToggleSidebar?.click(); }
 	});
 
 	let shiftTapCount = 0; let shiftTapTimer = null;
@@ -570,15 +585,194 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	updateEmptyState();
 
 	const sidebarNewFile = document.getElementById('sidebarNewFile');
-	const sidebarNewFolder = document.getElementById('sidebarNewFolder');
+const sidebarNewFolder = document.getElementById('sidebarNewFolder');
+const sidebarOpenFile = document.getElementById('sidebarOpenFile');
+const sidebarOpenFolder = document.getElementById('sidebarOpenFolder');
 			safeBind(sidebarNewFile, 'click', async () => { hideAnyModal(); if (!currentWorkspaceRoot) { alert('Open a folder first to create a file.'); return; } const base = selectedDirectoryPath || currentWorkspaceRoot; const name = await showInputModal({ title: 'New File', label: 'File name', placeholder: 'e.g. index.js', okText: 'Create File', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFile({ dir: base, name: val }); if (!res?.ok) return res?.error || 'Failed to create file'; return ''; } }); if (!name) return; const pathGuess = (selectedDirectoryPath || currentWorkspaceRoot) + '/' + name; const file = await window.bridge.readFileByPath(pathGuess); openInTabSafe(pathGuess, file?.content ?? ''); });
 	safeBind(sidebarNewFolder, 'click', () => { window.createFolderFlow(); });
+safeBind(sidebarOpenFile, 'click', openFileFlow);
+safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 
 	document.addEventListener('click', (e) => { const t = e.target; if (t instanceof Element && t.id === 'sidebarNewFolder') { e.preventDefault(); window.createFolderFlow(); } }, true);
 
 	const mViewToggleTerminal = document.getElementById('mViewToggleTerminal');
 	const terminalPanel = document.getElementById('terminalPanel');
-	const terminalEl = document.getElementById('terminal');
+	const terminalTabs = document.getElementById('terminalTabs');
+	const terminalViews = document.getElementById('terminalViews');
+	const terminalNew = document.getElementById('terminalNew');
+
+	// Multi-terminal state
+	let terminals = new Map(); // id -> { instance, viewEl, tabEl }
+	let terminalOrder = []; // ordered list of ids for tab order
+	let terminalOnDataBound = false;
+
+	function renderTerminalTabs() {
+		if (!terminalTabs) return;
+		terminalTabs.innerHTML = '';
+		for (const id of terminalOrder) {
+			const rec = terminals.get(id);
+			if (!rec) continue;
+			const tab = document.createElement('button');
+			tab.className = 'terminal-tab' + (id === termId ? ' active' : '');
+			tab.innerHTML = `<span>Terminal ${id}</span><span class="close" title="Close">✕</span>`;
+			tab.addEventListener('click', (e) => {
+				if ((e.target instanceof Element) && e.target.closest('.close')) {
+					e.preventDefault(); e.stopPropagation(); closeTerminal(id);
+					return;
+				}
+				switchTerminal(id);
+			});
+			rec.tabEl = tab;
+			terminalTabs.appendChild(tab);
+		}
+	}
+
+	function switchTerminal(id) {
+		const rec = terminals.get(id);
+		if (!rec) return;
+		// Activate view
+		for (const otherId of terminalOrder) {
+			const r = terminals.get(otherId);
+			if (!r) continue;
+			r.viewEl.classList.toggle('active', otherId === id);
+			r.tabEl?.classList.toggle('active', otherId === id);
+		}
+		termId = id;
+		termInstance = rec.instance;
+		// Focus and resize after view becomes visible
+		setTimeout(() => {
+			applyTerminalResizeFor(id);
+			rec.instance.focus();
+		}, 50);
+	}
+
+	function applyTerminalResizeFor(id) {
+		const rec = terminals.get(id);
+		if (!rec) return;
+		const el = rec.viewEl.querySelector('.xterm');
+		if (!el || !rec.instance) return;
+		const cols = Math.max(20, Math.floor(el.clientWidth / 9));
+		const rows = Math.max(5, Math.floor(el.clientHeight / 18));
+		try {
+			rec.instance.resize(cols, rows);
+			if (window.bridge.terminal.resize && id) {
+				window.bridge.terminal.resize(id, cols, rows);
+			}
+		} catch (err) {
+			console.error('Resize failed:', err);
+		}
+	}
+
+	function attachGlobalTerminalOnData() {
+		if (terminalOnDataBound) return;
+		terminalOnDataBound = true;
+		window.bridge.terminal.onData((p) => {
+			const rec = terminals.get(p.id);
+			if (rec && rec.instance) {
+				rec.instance.write(p.data);
+			}
+		});
+	}
+
+	async function createTerminal() {
+		// Ensure xterm
+		const xtermLoaded = await ensureXtermLoadedWithFallback();
+		if (!xtermLoaded) {
+			console.error('✗ xterm failed to load completely');
+			alert('Terminal library failed to load.');
+			return;
+		}
+		attachGlobalTerminalOnData();
+
+		// Create view container
+		const view = document.createElement('div');
+		view.className = 'terminal-view';
+		const xtermHost = document.createElement('div');
+		xtermHost.className = 'xterm';
+		view.appendChild(xtermHost);
+		terminalViews?.appendChild(view);
+
+		// Create terminal instance
+		let instance;
+		try {
+			instance = new window.Terminal({
+				convertEol: true,
+				cursorBlink: true,
+				fontSize: 14,
+				fontFamily: 'JetBrains Mono, Fira Code, Menlo, Consolas, monospace',
+				scrollback: 1000,
+				theme: getTerminalThemeForCurrentSettings()
+			});
+			instance.open(xtermHost);
+		} catch (error) {
+			console.error('✗ Failed to create terminal instance:', error);
+			view.remove();
+			return;
+		}
+
+		// Create backend pty
+		const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || undefined);
+		if (!created?.id) {
+			console.error('✗ Terminal create failed:', created);
+			instance.dispose?.();
+			view.remove();
+			return;
+		}
+		const id = created.id;
+
+		// Wire input -> backend
+		instance.onData((data) => {
+			if (window.bridge.terminal.write) window.bridge.terminal.write(id, data);
+		});
+
+		// Track
+		terminals.set(id, { instance, viewEl: view, tabEl: null });
+		terminalOrder.push(id);
+		renderTerminalTabs();
+
+		// Observe resize on this view
+		const ro = new ResizeObserver(() => setTimeout(() => applyTerminalResizeFor(id), 100));
+		ro.observe(xtermHost);
+
+		// Activate this terminal
+		switchTerminal(id);
+
+		// Initial prompt
+		setTimeout(() => {
+			applyTerminalResizeFor(id);
+			if (window.bridge.terminal.write) {
+				window.bridge.terminal.write(id, 'clear\r');
+				setTimeout(() => window.bridge.terminal.write(id, 'echo "Terminal ready!"\r'), 80);
+			}
+		}, 120);
+
+		return id;
+	}
+
+	async function closeTerminal(id) {
+		const rec = terminals.get(id);
+		if (!rec) return;
+		try { await window.bridge.terminal.dispose?.(id); } catch {}
+		try { rec.instance.dispose?.(); } catch {}
+		rec.viewEl.remove();
+		terminals.delete(id);
+		terminalOrder = terminalOrder.filter(x => x !== id);
+		renderTerminalTabs();
+		if (termId === id) {
+			const next = terminalOrder[terminalOrder.length - 1];
+			if (next) switchTerminal(next);
+			else { termId = null; termInstance = null; }
+		}
+		if (terminalOrder.length === 0) {
+			terminalPanel?.classList.add('hidden');
+		}
+	}
+
+	// New terminal button
+	safeBind(terminalNew, 'click', async () => {
+		terminalPanel?.classList.remove('hidden');
+		await createTerminal();
+	});
 
 	// Improved terminal loading using AMD loader
 	async function ensureXtermLoaded() {
@@ -651,8 +845,13 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	safeBind(mViewToggleTerminal, 'click', async () => {
 		terminalPanel?.classList.toggle('hidden');
 		if (!terminalPanel?.classList.contains('hidden')) {
-			await ensureTerminal();
-			termInstance?.focus();
+			if (!terminalOrder.length) {
+				await createTerminal();
+			} else {
+				const active = terminals.get(termId);
+				active?.instance?.focus?.();
+				setTimeout(() => applyTerminalResizeFor(termId), 60);
+			}
 		}
 	});
 		// Fixed terminal initialization with improved xterm loading

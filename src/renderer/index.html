@@ -61,6 +61,7 @@
 				<div class="menu" data-menu="view">
 					<span class="menu-label">View</span>
 					<div class="dropdown">
+						<button class="menu-item" id="mViewToggleSidebar"><span>Toggle Sidebar</span><kbd>Ctrl+B</kbd></button>
 						<div class="menu-item" style="pointer-events:none; opacity:.8;">Theme</div>
 						<button class="menu-item" id="mThemeDark"><span>Dark</span></button>
 						<button class="menu-item" id="mThemeLight"><span>Light</span></button>
@@ -96,6 +97,25 @@
 							</svg>
 						</button>
 					</div>
+					<div id="sidebarWelcome" class="sidebar-welcome" style="display:none;">
+						<h3>Welcome to Barge</h3>
+						<p>Open a file or folder to get started</p>
+						<div class="sidebar-welcome-buttons">
+							<button id="sidebarOpenFile" class="sidebar-welcome-btn primary">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/>
+									<path d="M14 2v7h7"/>
+								</svg>
+								Open File
+							</button>
+							<button id="sidebarOpenFolder" class="sidebar-welcome-btn">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M3 7h5l2 2h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+								</svg>
+								Open Folder
+							</button>
+						</div>
+					</div>
 					<div id="fileTree" class="file-tree"></div>
 					<div id="searchPanel" class="search-panel hidden">
 						<div class="search-header">Find in Files</div>
@@ -117,7 +137,11 @@
 					</header>
 					<div id="editor"></div>
 					<div id="terminalPanel" class="terminal hidden">
-						<div id="terminal" class="xterm"></div>
+						<div class="terminal-header">
+							<div id="terminalTabs" class="terminal-tabs"></div>
+							<button id="terminalNew" class="terminal-new" title="New Terminal">+</button>
+						</div>
+						<div id="terminalViews" class="terminal-views"></div>
 					</div>
 					<footer class="statusbar">
 						<span id="cursorPos">Ln 1, Col 1</span>
