@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('bridge', {
 	renamePath: async (payload) => ipcRenderer.invoke('fs:renamePath', payload),
 	movePath: async (payload) => ipcRenderer.invoke('fs:movePath', payload),
 	deletePath: async (payload) => ipcRenderer.invoke('fs:deletePath', payload),
+	revealInOS: async (targetPath) => ipcRenderer.invoke('os:reveal', targetPath),
 	onFsChanged: (callback) => {
 		const listener = (_event, payload) => callback(payload);
 		ipcRenderer.on('fs:changed', listener);

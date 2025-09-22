@@ -18,13 +18,13 @@
 				</div>
 				<div class="window-controls" style="-webkit-app-region: no-drag;">
 					<button id="winMin" title="Minimize" aria-label="Minimize">
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="#38bdf8"><rect x="6" y="11" width="12" height="2" rx="1"/></svg>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="#38bdf8"><rect x="6" y="11" width="12" height="2" rx="1"/></svg>
 					</button>
 					<button id="winMax" title="Maximize" aria-label="Maximize">
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="#22c55e"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="#22c55e"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
 					</button>
 					<button id="winClose" title="Close" aria-label="Close">
-						<svg width="12" height="12" viewBox="0 0 24 24" fill="#ef4444">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="#ef4444">
 							<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/>
 						</svg>
 					</button>
@@ -40,6 +40,9 @@
 						<button class="menu-item" id="mFileSave"><span>Save</span><kbd>Ctrl+S</kbd></button>
 						<button class="menu-item" id="mFileSaveAll"><span>Save All</span></button>
 						<button class="menu-item" id="mFileSaveAs"><span>Save As…</span><kbd>Ctrl+Shift+S</kbd></button>
+						<div class="menu-sep"></div>
+						<button class="menu-item" id="mFileOpenRecentFile"><span>Open Recent File…</span></button>
+						<button class="menu-item" id="mFileOpenRecentFolder"><span>Open Recent Folder…</span></button>
 						<div class="menu-sep"></div>
 						<button class="menu-item" id="mFileCloseAll"><span>Close All</span></button>
 						<button class="menu-item" id="mFileReopenClosed"><span>Reopen Closed Tab</span></button>
@@ -71,6 +74,8 @@
 						<button class="menu-item" id="mViewToggleLineNumbers"><span>Toggle Line Numbers</span></button>
 						<button class="menu-item" id="mViewToggleWhitespace"><span>Toggle Render Whitespace</span></button>
 						<button class="menu-item" id="mViewToggleTerminal"><span>Toggle Terminal</span><kbd>Ctrl+`</kbd></button>
+						<button class="menu-item" id="mViewFullScreen"><span>Toggle Full Screen</span><kbd>F11</kbd></button>
+						<button class="menu-item" id="mViewZenMode"><span>Toggle Zen Mode</span></button>
 					</div>
 				</div>
 				<div class="menu" data-menu="help">
@@ -165,6 +170,10 @@
 					<label class="field">
 						<span>Editor font size</span>
 						<input id="prefFontSize" type="number" min="8" max="48" step="1" />
+					</label>
+					<label class="field">
+						<span>App opacity</span>
+						<input id="prefAppOpacity" type="range" min="0.6" max="1" step="0.02" />
 					</label>
 					<label class="field">
 						<span>Auto save</span>
@@ -265,6 +274,22 @@
 		</div>
 		
 		<!-- Load xterm browser bundle so Terminal is global -->
+		<div id="recentModal" class="modal hidden">
+			<div class="modal-backdrop"></div>
+			<div class="modal-card recent-card">
+				<div class="modal-header"><h3 id="recentTitle">Open Recent</h3></div>
+				<div class="modal-body">
+					<div class="recent-kind-switch">
+						<button id="recentSwitchFile" class="btn btn-small btn-primary">Files</button>
+						<button id="recentSwitchFolder" class="btn btn-small">Folders</button>
+					</div>
+					<div id="recentList" class="recent-list"></div>
+				</div>
+				<div class="modal-footer">
+					<button id="recentCancel" class="btn btn-ghost">Close</button>
+				</div>
+			</div>
+		</div>
 		<script src="../../node_modules/xterm/lib/xterm.js"></script>
 		<script src="renderer.js"></script>
 	</body>

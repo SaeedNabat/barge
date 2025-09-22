@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
+import { shell } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
@@ -64,6 +65,18 @@ ipcMain.handle('window:maximizeToggle', () => {
 	if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize();
 });
 ipcMain.handle('window:close', () => { mainWindow?.close(); });
+
+ipcMain.handle('window:setOpacity', (_evt, value) => {
+	try { const v = Math.max(0.6, Math.min(1, Number(value) || 1)); mainWindow?.setOpacity(v); } catch {}
+	return { ok: true };
+});
+
+ipcMain.handle('window:toggleFullScreen', () => {
+	if (!mainWindow) return { ok: false };
+	const next = !mainWindow.isFullScreen();
+	mainWindow.setFullScreen(next);
+	return { ok: true, fullScreen: next };
+});
 
 async function openFile() {
 	const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
@@ -261,6 +274,11 @@ ipcMain.handle('terminal:dispose', (_evt, { id }) => {
 	const term = terminals.get(id);
 	if (term) try { term.kill(); } catch {}
 	terminals.delete(id);
+});
+
+ipcMain.handle('os:reveal', async (_evt, targetPath) => {
+	try { if (targetPath) shell.showItemInFolder(targetPath); } catch {}
+	return { ok: true };
 });
 
 ipcMain.handle('fs:createFolder', async (_evt, { root, name }) => {

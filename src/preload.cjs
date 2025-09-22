@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('bridge', {
 	renamePath: async ({ oldPath, newName }) => ipcRenderer.invoke('fs:renamePath', { oldPath, newName }),
 	deletePath: async ({ target }) => ipcRenderer.invoke('fs:deletePath', { target }),
 	movePath: async ({ sourcePath, targetDir, newName }) => ipcRenderer.invoke('fs:movePath', { sourcePath, targetDir, newName }),
+	revealInOS: async (targetPath) => ipcRenderer.invoke('os:reveal', targetPath),
 	terminal: {
 		create: async (cols, rows, cwd) => ipcRenderer.invoke('terminal:create', cols, rows, cwd),
 		write: async (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
@@ -53,6 +54,8 @@ contextBridge.exposeInMainWorld('bridge', {
 		minimize: () => ipcRenderer.invoke('window:minimize'),
 		maximizeToggle: () => ipcRenderer.invoke('window:maximizeToggle'),
 		close: () => ipcRenderer.invoke('window:close'),
+		setOpacity: (value) => ipcRenderer.invoke('window:setOpacity', value),
+		toggleFullScreen: () => ipcRenderer.invoke('window:toggleFullScreen'),
 	},
 	onFileOpened: (callback) => { fileOpenedListeners.add(callback); return () => fileOpenedListeners.delete(callback); },
 	onFileSaved: (callback) => { fileSavedListeners.add(callback); return () => fileSavedListeners.delete(callback); },

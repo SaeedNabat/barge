@@ -37,6 +37,12 @@ let closedStack = [];
 let currentWorkspaceRoot = null; let isOpeningFile = false; let isOpeningFolder = false;
 let untitledCounter = 1; let termInstance = null; let termId = null; let selectedDirectoryPath = null; let refreshTimer = null;
 
+function isUntitledPath(p) {
+	if (!p) return true;
+	// Treat tabs created via New File as untitled, typically start with 'Untitled-'
+	return /^Untitled-\d+\./.test(p);
+}
+
 // Ensure createFolderFlow is globally available before any bindings
 window.createFolderFlow = async function createFolderFlow() {
 	if (!currentWorkspaceRoot) { alert('Open a folder first to create a subfolder.'); return; }
@@ -54,48 +60,41 @@ window.createFolderFlow = async function createFolderFlow() {
 	/* incremental update handled by fs:changed */
 };
 
-async function showInputModal({ title, label, placeholder, okText = 'Create', validate, onSubmit }) {
-	return new Promise((resolve) => {
+async function showInputModal({ title, label, placeholder, okText = 'OK', validate, onSubmit }) {
 		const modal = document.getElementById('inputModal');
-		const input = document.getElementById('inputField');
 		const titleEl = document.getElementById('inputTitle');
 		const labelEl = document.getElementById('inputLabel');
-		const errorEl = document.getElementById('inputError');
+	const input = document.getElementById('inputField');
 		const btnOk = document.getElementById('inputOk');
 		const btnCancel = document.getElementById('inputCancel');
-		titleEl.textContent = title || 'Enter Name';
-		labelEl.textContent = label || 'Name';
-		btnOk.textContent = okText;
+	const errEl = document.getElementById('inputError');
+	
+	return new Promise((resolve) => {
+		titleEl.textContent = title || 'Input';
+		labelEl.textContent = label || 'Value';
 		input.value = '';
 		input.placeholder = placeholder || '';
-		errorEl.style.display = 'none';
-		errorEl.textContent = '';
+		errEl.style.display = 'none';
+		errEl.textContent = '';
+		btnOk.textContent = okText || 'OK';
 		modal.classList.remove('hidden');
 		setTimeout(() => input.focus(), 0);
-		let submitting = false;
+		
 		async function doSubmit() {
-			if (submitting) return;
-			submitting = true;
-			const val = input.value.trim();
-			if (validate) {
-				const msg = validate(val);
-				if (msg) { errorEl.textContent = msg; errorEl.style.display = 'block'; submitting = false; return; }
-			}
+			const v = input.value;
+			const msg = validate ? validate(v) : '';
+			if (msg) { errEl.textContent = msg; errEl.style.display = 'block'; return; }
 			if (onSubmit) {
-				try {
-					const err = await onSubmit(val);
-					if (err) { errorEl.textContent = err; errorEl.style.display = 'block'; submitting = false; return; }
-				} catch (e) {
-					errorEl.textContent = String(e);
-					errorEl.style.display = 'block';
-					submitting = false;
-					return;
-				}
+				const err = await onSubmit(v);
+				if (err) { errEl.textContent = err; errEl.style.display = 'block'; return; }
 			}
-			close(val || null);
+			close(v);
 		}
 		function close(v) {
 			modal.classList.add('hidden');
+			titleEl.textContent = '';
+			labelEl.textContent = '';
+			btnOk.textContent = 'OK';
 			btnOk.removeEventListener('click', onOk);
 			btnCancel.removeEventListener('click', onCancel);
 			input.removeEventListener('keydown', onKey);
@@ -148,19 +147,64 @@ function createUntitled() {
 	const name = `Untitled-${untitledCounter++}.txt`;
 	// Create a new untitled file directly without any dialog
 	if (monacoRef) {
-		// Monaco is ready, open file directly
 		openFileInTab(name, '');
 	} else {
-		// Monaco not ready, queue the file opening
 		window.__PENDING_OPEN__ = { filePath: name, content: '' };
 		window.dispatchEvent(new Event('barge:pending-open'));
 	}
-	updateEmptyState();
 }
 
-function isUntitledPath(p) {
-	return p && p.startsWith('Untitled-');
+// Add working flows for context menu actions
+async function renameFlow(oldPath) {
+	const suggested = (oldPath || '').split('/').pop() || '';
+	const val = await showInputModal({
+		title: 'Rename',
+		label: 'New name',
+		placeholder: suggested,
+		okText: 'Rename',
+		validate: (v) => {
+			if (!v) return 'Name is required';
+			if (/[\\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|';
+			return '';
+		},
+		onSubmit: async (newName) => {
+			const res = await window.bridge.renamePath({ oldPath, newName });
+			if (!res?.ok) return res?.error || 'Rename failed';
+			return '';
+		}
+	});
+	if (!val) return;
+	await refreshTree();
 }
+
+async function deleteFlow(targetPath) {
+	const confirmed = await showInputModal({
+		title: 'Delete',
+		label: 'Type DELETE to confirm',
+		okText: 'Delete',
+		validate: (v) => v === 'DELETE' ? '' : 'Please type DELETE to confirm',
+		onSubmit: async () => {
+			// Try to animate the corresponding tree item before deletion
+			try {
+				const fileTreeEl = document.getElementById('fileTree');
+				const item = fileTreeEl?.querySelector(`.item[data-path="${CSS.escape(targetPath)}"]`);
+				if (item) {
+					item.classList.add('deleting');
+					await new Promise(r => setTimeout(r, 260));
+				}
+			} catch {}
+			const res = await window.bridge.deletePath({ target: targetPath });
+			if (!res?.ok) return res?.error || 'Delete failed';
+			return '';
+		}
+	});
+	if (!confirmed) return;
+	await refreshTree();
+}
+
+// Expose flows globally for other handlers
+window.renameFlow = renameFlow;
+window.deleteFlow = deleteFlow;
 
 const settings = {
 	fontFamily: 'JetBrains Mono, Fira Code, Menlo, Consolas, "Liberation Mono", monospace',
@@ -183,13 +227,18 @@ function saveSettings() { localStorage.setItem('barge:settings', JSON.stringify(
 function applySettings() {
 	if (!editor || !monacoRef) return;
 	editor.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize });
-	monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
+		monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
 	document.body.classList.toggle('theme-light', settings.theme === 'light');
 	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace });
-	
-	// Update terminal theme if terminal exists
-	updateTerminalTheme();
-}
+		
+		// Apply app opacity (window-level if available)
+		try { window.bridge?.window?.setOpacity?.(settings.appOpacity || 1); } catch {}
+		const appEl = document.querySelector('.app');
+		if (appEl) appEl.style.opacity = String(settings.appOpacity || 1);
+		
+		// Update terminal theme if terminal exists
+		updateTerminalTheme();
+	}
 
 function getTerminalThemeForCurrentSettings() {
 	const isLightTheme = settings.theme === 'light';
@@ -265,12 +314,19 @@ function updateEmptyState() {
 // Early bootstrap to ensure clicks work even if Monaco hasn't finished loading
 window.addEventListener('DOMContentLoaded', () => {
 	loadSettings();
+	loadRecents();
 
 	const menubar = document.getElementById('menubar');
 	menubar?.addEventListener('click', (e) => {
-		if ((e.target instanceof Element) && e.target.closest('.menu-item')) {
-			menubar.querySelectorAll('.menu.open').forEach(el => el.classList.remove('open'));
+		if (!(e.target instanceof Element)) return;
+		const btn = e.target.closest('.menu-item');
+		if (!btn) return;
+		const id = btn.id;
+		if (id === 'mFileOpenRecentFile' || id === 'mFileOpenRecentFolder') {
+			// Keep menu open to show the recent popover
+			return;
 		}
+		menubar.querySelectorAll('.menu.open').forEach(el => el.classList.remove('open'));
 	});
 
 	async function openFileFlow() {
@@ -279,6 +335,7 @@ window.addEventListener('DOMContentLoaded', () => {
 			hideAnyModal();
 			const res = await window.bridge?.openFile?.();
 			if (res && res.filePath) {
+				addRecentFile(res.filePath);
 				openInTabSafe(res.filePath, res.content);
 			}
 		} finally { isOpeningFile = false; }
@@ -290,6 +347,7 @@ window.addEventListener('DOMContentLoaded', () => {
 			hideAnyModal();
 			const payload = await window.bridge?.openFolder?.();
 			if (payload && payload.root) {
+				addRecentFolder(payload.root);
 				if (window.bargeRenderTree) {
 					currentWorkspaceRoot = payload.root;
 					window.bargeRenderTree(payload.root, payload.tree);
@@ -323,6 +381,8 @@ window.addEventListener('DOMContentLoaded', () => {
 	const mFileSave = document.getElementById('mFileSave');
 	const mFileSaveAll = document.getElementById('mFileSaveAll');
 	const mFileSaveAs = document.getElementById('mFileSaveAs');
+	const mFileOpenRecentFile = document.getElementById('mFileOpenRecentFile');
+	const mFileOpenRecentFolder = document.getElementById('mFileOpenRecentFolder');
 	const mFileCloseAll = document.getElementById('mFileCloseAll');
 	const mFileReopenClosed = document.getElementById('mFileReopenClosed');
 	const mFileExit = document.getElementById('mFileExit');
@@ -330,11 +390,14 @@ window.addEventListener('DOMContentLoaded', () => {
 	const mEditUndo = document.getElementById('mEditUndo');
 	const mEditRedo = document.getElementById('mEditRedo');
 	const mThemeDark = document.getElementById('mThemeDark');
-const mThemeLight = document.getElementById('mThemeLight');
+	const mThemeLight = document.getElementById('mThemeLight');
 const mViewToggleSidebar = document.getElementById('mViewToggleSidebar');
+const mViewFullScreen = document.getElementById('mViewFullScreen');
+const mViewZenMode = document.getElementById('mViewZenMode');
 	const prefsModal = document.getElementById('prefsModal');
 	const prefFontFamily = document.getElementById('prefFontFamily');
 	const prefFontSize = document.getElementById('prefFontSize');
+	const prefAppOpacity = document.getElementById('prefAppOpacity');
 	const prefAutoSave = document.getElementById('prefAutoSave');
 	const prefAutoSaveDelay = document.getElementById('prefAutoSaveDelay');
 	const autoSaveDelayField = document.getElementById('autoSaveDelayField');
@@ -398,6 +461,17 @@ const mViewToggleSidebar = document.getElementById('mViewToggleSidebar');
 		setTimeout(() => cmdInput.focus(), 0);
 	}
 	function toggleCmdPalette() { if (cmdPalette.classList.contains('hidden')) openCmdPalette(); else closeCmdPalette(); }
+	// Bind input events for live filtering and navigation
+	cmdInput.addEventListener('input', () => filterCommands(cmdInput.value));
+	cmdInput.addEventListener('keydown', (e) => {
+		if (!cmdFiltered.length) return;
+		switch (e.key) {
+			case 'ArrowDown': e.preventDefault(); cmdSelected = Math.min(cmdFiltered.length - 1, cmdSelected + 1); renderCmdList(cmdFiltered); break;
+			case 'ArrowUp': e.preventDefault(); cmdSelected = Math.max(0, cmdSelected - 1); renderCmdList(cmdFiltered); break;
+			case 'Enter': e.preventDefault(); executeCmd(cmdFiltered[cmdSelected]); break;
+			default: break;
+		}
+	});
 
 	function renderCmdList(list) {
 		cmdList.innerHTML = '';
@@ -496,7 +570,7 @@ safeBind(winClose, 'click', () => window.bridge?.window?.close?.());
 safeBind(mHelpAbout, 'click', () => { aboutModal.classList.remove('hidden'); });
 safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 
-// Basic menu bindings
+	// Basic menu bindings
 	safeBind(mEditUndo, 'click', () => { editor?.trigger('menu', 'undo', null); });
 	safeBind(mEditRedo, 'click', () => { editor?.trigger('menu', 'redo', null); });
 	safeBind(mEditPreferences, 'click', () => { if (typeof openPrefs === 'function') openPrefs(); else setTimeout(() => openPrefs?.(), 100); });
@@ -504,12 +578,12 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	safeBind(mThemeLight, 'click', () => { settings.theme = 'light'; saveSettings(); applySettings(); });
 safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.classList.toggle('sidebar-hidden'); saveSettings(); });
 
-	function openPrefs() { prefFontFamily.value = settings.fontFamily; prefFontSize.value = settings.fontSize; prefAutoSave.value = settings.autoSave; prefAutoSaveDelay.value = settings.autoSaveDelay; autoSaveDelayField.style.display = settings.autoSave === 'afterDelay' ? 'grid' : 'none'; prefsModal.classList.remove('hidden'); }
+	function openPrefs() { prefFontFamily.value = settings.fontFamily; prefFontSize.value = settings.fontSize; if (prefAppOpacity) prefAppOpacity.value = String(settings.appOpacity || 1); prefAutoSave.value = settings.autoSave; prefAutoSaveDelay.value = settings.autoSaveDelay; autoSaveDelayField.style.display = settings.autoSave === 'afterDelay' ? 'grid' : 'none'; prefsModal.classList.remove('hidden'); }
 	function closePrefs() { prefsModal.classList.add('hidden'); }
 
 	safeBind(prefsCancel, 'click', closePrefs);
 	safeBind(prefAutoSave, 'change', () => { autoSaveDelayField.style.display = prefAutoSave.value === 'afterDelay' ? 'grid' : 'none'; });
-	safeBind(prefsSave, 'click', () => { settings.fontFamily = prefFontFamily.value || settings.fontFamily; settings.fontSize = Math.max(8, Math.min(48, parseInt(prefFontSize.value || settings.fontSize, 10))); settings.autoSave = prefAutoSave.value; settings.autoSaveDelay = Math.max(100, Math.min(10000, parseInt(prefAutoSaveDelay.value || settings.autoSaveDelay, 10))); saveSettings(); applySettings(); closePrefs(); });
+	safeBind(prefsSave, 'click', () => { settings.fontFamily = prefFontFamily.value || settings.fontFamily; settings.fontSize = Math.max(8, Math.min(48, parseInt(prefFontSize.value || settings.fontSize, 10))); settings.appOpacity = Math.max(0.6, Math.min(1, parseFloat((prefAppOpacity && prefAppOpacity.value) ? prefAppOpacity.value : String(settings.appOpacity || 1)))); settings.autoSave = prefAutoSave.value; settings.autoSaveDelay = Math.max(100, Math.min(10000, parseInt(prefAutoSaveDelay.value || settings.autoSaveDelay, 10))); saveSettings(); applySettings(); closePrefs(); });
 
 	safeBind(mEditFind, 'click', () => { editor?.getAction('actions.find')?.run(); });
 	safeBind(mEditFindInFiles, 'click', () => { searchPanel.classList.toggle('hidden'); searchQuery.focus(); });
@@ -572,20 +646,12 @@ safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.cl
 	if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); mViewToggleSidebar?.click(); }
 	});
 
-	let shiftTapCount = 0; let shiftTapTimer = null;
-	function registerShiftTap() {
-		const now = Date.now();
-		if (shiftTapCount === 0) { lastShiftTime = now; shiftTapCount = 1; clearTimeout(shiftTapTimer); shiftTapTimer = setTimeout(() => { shiftTapCount = 0; }, 2000); return; }
-		if (now - lastShiftTime <= 2000) { shiftTapCount = 0; clearTimeout(shiftTapTimer); toggleCmdPalette(); }
-	}
-	const onShiftKey = (e) => { if (e.key === 'Shift' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.repeat) { e.preventDefault(); registerShiftTap(); } };
-	window.addEventListener('keydown', onShiftKey, true);
-	window.addEventListener('keyup', onShiftKey, true);
+
 
 	updateEmptyState();
 
 	const sidebarNewFile = document.getElementById('sidebarNewFile');
-const sidebarNewFolder = document.getElementById('sidebarNewFolder');
+	const sidebarNewFolder = document.getElementById('sidebarNewFolder');
 const sidebarOpenFile = document.getElementById('sidebarOpenFile');
 const sidebarOpenFolder = document.getElementById('sidebarOpenFolder');
 			safeBind(sidebarNewFile, 'click', async () => { hideAnyModal(); if (!currentWorkspaceRoot) { alert('Open a folder first to create a file.'); return; } const base = selectedDirectoryPath || currentWorkspaceRoot; const name = await showInputModal({ title: 'New File', label: 'File name', placeholder: 'e.g. index.js', okText: 'Create File', validate: (v) => { if (!v) return 'Name is required'; if (/[\\/:*?"<>|]/.test(v)) return 'Invalid characters: \\/:*?"<>|'; return ''; }, onSubmit: async (val) => { const res = await window.bridge.createFile({ dir: base, name: val }); if (!res?.ok) return res?.error || 'Failed to create file'; return ''; } }); if (!name) return; const pathGuess = (selectedDirectoryPath || currentWorkspaceRoot) + '/' + name; const file = await window.bridge.readFileByPath(pathGuess); openInTabSafe(pathGuess, file?.content ?? ''); });
@@ -640,7 +706,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		termId = id;
 		termInstance = rec.instance;
 		// Focus and resize after view becomes visible
-		setTimeout(() => {
+				setTimeout(() => {
 			applyTerminalResizeFor(id);
 			rec.instance.focus();
 		}, 50);
@@ -794,10 +860,10 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 				require.config({
 					paths: {
 						'xterm': '../../node_modules/xterm/lib/xterm'
-					}
-				});
-			}
-			
+				}
+			});
+		}
+
 			// Load xterm using AMD
 			return new Promise((resolve) => {
 				require(['xterm'], (xterm) => {
@@ -847,7 +913,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		if (!terminalPanel?.classList.contains('hidden')) {
 			if (!terminalOrder.length) {
 				await createTerminal();
-			} else {
+					} else {
 				const active = terminals.get(termId);
 				active?.instance?.focus?.();
 				setTimeout(() => applyTerminalResizeFor(termId), 60);
@@ -1013,57 +1079,57 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 			} else {
 				console.log('Terminal already exists, focusing...');
 				termInstance.focus();
-			}
 		}
+}
 
-		// Simple terminal test - add this to test basic functionality
-		function testTerminal() {
-			console.log('=== TERMINAL TEST START ===');
-			
-			// Check if Terminal is available
-			console.log('window.Terminal available:', !!window.Terminal);
-			
-			// Check terminal element
-			const terminalEl = document.getElementById('terminal');
-			console.log('Terminal element:', terminalEl);
-			console.log('Terminal element dimensions:', terminalEl ? {
-				width: terminalEl.clientWidth,
-				height: terminalEl.clientHeight,
-				offsetWidth: terminalEl.offsetWidth,
-				offsetHeight: terminalEl.offsetHeight
-			} : 'not found');
-			
-			// Check terminal panel
-			const terminalPanel = document.getElementById('terminalPanel');
-			console.log('Terminal panel:', terminalPanel);
-			console.log('Terminal panel hidden:', terminalPanel?.classList.contains('hidden'));
-			
-			// Check bridge
-			console.log('window.bridge available:', !!window.bridge);
-			console.log('window.bridge.terminal available:', !!(window.bridge && window.bridge.terminal));
-			
-			console.log('=== TERMINAL TEST END ===');
-		}
+// Simple terminal test - add this to test basic functionality
+function testTerminal() {
+	console.log('=== TERMINAL TEST START ===');
+	
+	// Check if Terminal is available
+	console.log('window.Terminal available:', !!window.Terminal);
+	
+	// Check terminal element
+	const terminalEl = document.getElementById('terminal');
+	console.log('Terminal element:', terminalEl);
+	console.log('Terminal element dimensions:', terminalEl ? {
+		width: terminalEl.clientWidth,
+		height: terminalEl.clientHeight,
+		offsetWidth: terminalEl.offsetWidth,
+		offsetHeight: terminalEl.offsetHeight
+	} : 'not found');
+	
+	// Check terminal panel
+	const terminalPanel = document.getElementById('terminalPanel');
+	console.log('Terminal panel:', terminalPanel);
+	console.log('Terminal panel hidden:', terminalPanel?.classList.contains('hidden'));
+	
+	// Check bridge
+	console.log('window.bridge available:', !!window.bridge);
+	console.log('window.bridge.terminal available:', !!(window.bridge && window.bridge.terminal));
+	
+	console.log('=== TERMINAL TEST END ===');
+}
 
-		// Make test function available globally
-		window.testTerminal = testTerminal;
+// Make test function available globally
+window.testTerminal = testTerminal;
 
-		// Add DOM ready handler to ensure proper initialization timing
-		document.addEventListener('DOMContentLoaded', () => {
-			console.log('DOM Content Loaded - Terminal should be available now');
-			
-			// Check if Terminal is available
-			if (window.Terminal) {
-				console.log('✓ Terminal is available on DOM ready');
-			} else {
-				console.log('⚠ Terminal not yet available on DOM ready');
-			}
-			
-			// Make terminal initialization available globally for testing
-			window.initializeTerminal = async () => {
-				console.log('Manual terminal initialization triggered');
-				await ensureTerminal();
-			};
+// Add DOM ready handler to ensure proper initialization timing
+document.addEventListener('DOMContentLoaded', () => {
+	console.log('DOM Content Loaded - Terminal should be available now');
+	
+	// Check if Terminal is available
+	if (window.Terminal) {
+		console.log('✓ Terminal is available on DOM ready');
+	} else {
+		console.log('⚠ Terminal not yet available on DOM ready');
+	}
+	
+	// Make terminal initialization available globally for testing
+	window.initializeTerminal = async () => {
+		console.log('Manual terminal initialization triggered');
+		await ensureTerminal();
+	};
 		});
 
 		// Add missing functions for file tree and editor functionality
@@ -1127,44 +1193,25 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		function renderNode(node) {
 			const el = document.createElement('div');
 			el.className = 'item';
-			el.dataset.path = node.path;
-			el.dataset.type = node.type;
-			
-			const icon = document.createElement('span');
-			icon.className = 'icon';
-			icon.innerHTML = iconSvg(node.type, node.name); // Pass the filename
-			el.appendChild(icon);
-			
-			const name = document.createElement('span');
-			name.className = 'name';
-			name.textContent = node.name;
-			el.appendChild(name);
-			
+			el.dataset.path = node.path || '';
+			el.dataset.type = node.type || '';
+			el.innerHTML = `${iconSvg(node.type, node.name)} <span>${node.name}</span>`;
+			el.draggable = true;
 			if (node.type === 'dir') {
-				// Add expand/collapse functionality
-				el.addEventListener('click', (e) => {
-					e.stopPropagation();
-					const children = el.nextSibling;
-					if (children && children.classList.contains('children')) {
-						const isExpanded = children.style.display === 'block';
-						children.style.display = isExpanded ? 'none' : 'block';
-						el.classList.toggle('expanded', !isExpanded);
-					}
+				const caret = document.createElement('span'); caret.className = 'caret'; caret.innerHTML = '';
+				const name = document.createElement('span'); name.textContent = node.name;
+				el.innerHTML = `${iconSvg('dir', node.name)} <span>${node.name}</span>`;
+				const children = document.createElement('div'); children.className = 'children'; children.style.display = 'none';
+				let expanded = false;
+				el.addEventListener('click', () => {
+					expanded = !expanded;
+					children.style.display = expanded ? 'block' : 'none';
+					selectedDirectoryPath = node.path;
+					highlightSelectedDir(el);
 				});
-				
-				// Create children container and add it after the element
-				const children = document.createElement('div');
-				children.className = 'children';
-				children.style.display = 'none';
-				
-				// Add child nodes to the children container
-				if (node.children) {
-					for (const child of node.children) {
-						children.appendChild(renderNode(child));
-					}
+				for (const child of node.children || []) {
+					children.appendChild(renderNode(child));
 				}
-				
-				// Return both the element and its children container
 				const container = document.createElement('div');
 				container.appendChild(el);
 				container.appendChild(children);
@@ -1172,16 +1219,11 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 			} else {
 				el.addEventListener('click', () => {
 					highlightSelectedDir(el);
-					// Queue file opening until Monaco is ready
 					if (monacoRef) {
-						// Monaco is ready, open file directly
 						window.bridge.readFileByPath(node.path).then(file => {
-							if (file && file.content !== undefined) {
-								openFileInTab(node.path, file.content);
-							}
+							if (file && file.content !== undefined) openFileInTab(node.path, file.content);
 						});
 					} else {
-						// Monaco not ready, queue the file opening
 						window.__PENDING_OPEN__ = { filePath: node.path, content: '' };
 						window.dispatchEvent(new Event('barge:pending-open'));
 					}
@@ -1228,21 +1270,72 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		}
 
 		function attachTreeContextMenu(container) {
-			// Basic context menu implementation
+			let menuEl = null;
+			function destroyMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+			function showMenu(x, y, items) {
+				destroyMenu();
+				menuEl = document.createElement('div');
+				menuEl.className = 'context-menu';
+				for (const it of items) {
+					const btn = document.createElement('button');
+					btn.className = 'context-item';
+					btn.textContent = it.label;
+					btn.addEventListener('click', () => { destroyMenu(); it.action?.(); });
+					menuEl.appendChild(btn);
+				}
+				menuEl.style.left = `${x}px`;
+				menuEl.style.top = `${y}px`;
+				document.body.appendChild(menuEl);
+				requestAnimationFrame(() => menuEl.classList.add('show'));
+				setTimeout(() => {
+					const offClick = (e) => { if (!menuEl?.contains(e.target)) { destroyMenu(); document.removeEventListener('mousedown', offClick, true); } };
+					document.addEventListener('mousedown', offClick, true);
+				}, 0);
+			}
+			
 			container.addEventListener('contextmenu', (e) => {
 				e.preventDefault();
-				// Add context menu logic here if needed
-			});
+				const target = (e.target instanceof Element) ? e.target.closest('.item') : null;
+				if (!target) return;
+				highlightSelectedDir(target);
+				const path = target.dataset.path || '';
+				const kind = target.dataset.type || '';
+				const isDir = kind === 'dir' || !!(target.nextSibling && target.nextSibling.classList && target.nextSibling.classList.contains('children'));
+				const items = [];
+				if (isDir) {
+					items.push(
+						{ label: 'New File', action: () => { selectedDirectoryPath = path; document.getElementById('sidebarNewFile')?.click(); } },
+						{ label: 'New Folder', action: () => { selectedDirectoryPath = path; window.createFolderFlow?.(); } },
+					);
+				}
+				if (!isDir) {
+					items.push({ label: 'Open', action: async () => { const file = await window.bridge.readFileByPath(path); openInTabSafe(path, file?.content ?? ''); } });
+				}
+				// Common actions
+				items.push(
+					{ label: 'Rename', action: () => { if (typeof renameFlow === 'function') renameFlow(path); else if (window.renameFlow) window.renameFlow(path); else alert('Rename not available'); } },
+					{ label: 'Delete', action: () => { if (typeof deleteFlow === 'function') deleteFlow(path); else if (window.deleteFlow) window.deleteFlow(path); else alert('Delete not available'); } },
+					{ label: 'Copy Path', action: () => { try { navigator.clipboard?.writeText(path); } catch {} } },
+					{ label: 'Reveal in OS', action: () => { if (window.bridge?.revealInOS) window.bridge.revealInOS(path); else alert('Reveal not available'); } },
+					{ label: 'Reveal (Select)', action: () => { highlightSelectedDir(target); } }
+				);
+				showMenu(e.pageX, e.pageY, items);
+			}, false);
 		}
 
-		function enableTreeKeyboard(container) {
-			// Basic keyboard navigation
-			container.addEventListener('keydown', (e) => {
-				// Add keyboard navigation logic here if needed
-			});
+				function enableTreeKeyboard(container) {
+			// Basic keyboard navigation and shortcuts can be added later
 		}
 
-		function enableTreeDnD(container) {
+		// React to FS changes from main to keep the tree in sync
+		try {
+			window.bridge.onFsChanged?.(async (evt) => {
+				if (!currentWorkspaceRoot) return;
+				await refreshTree();
+			});
+		} catch {}
+ 
+ 		function enableTreeDnD(container) {
 			// Basic drag and drop
 			container.addEventListener('dragover', (e) => {
 				e.preventDefault();
@@ -1816,4 +1909,129 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 				}
 			});
 		}
-	});
+
+		let recentFiles = []; let recentFolders = [];
+		function loadRecents() {
+			try { const rf = JSON.parse(localStorage.getItem('barge:recentFiles') || '[]'); if (Array.isArray(rf)) recentFiles = rf.slice(0,5); } catch {}
+			try { const rd = JSON.parse(localStorage.getItem('barge:recentFolders') || '[]'); if (Array.isArray(rd)) recentFolders = rd.slice(0,5); } catch {}
+		}
+		function saveRecents() {
+			try { localStorage.setItem('barge:recentFiles', JSON.stringify(recentFiles.slice(0,5))); } catch {}
+			try { localStorage.setItem('barge:recentFolders', JSON.stringify(recentFolders.slice(0,5))); } catch {}
+		}
+		function addRecentFile(p) {
+			if (!p) return; const i = recentFiles.indexOf(p); if (i !== -1) recentFiles.splice(i,1); recentFiles.unshift(p); recentFiles = recentFiles.slice(0,5); saveRecents();
+		}
+		function addRecentFolder(p) {
+			if (!p) return; const i = recentFolders.indexOf(p); if (i !== -1) recentFolders.splice(i,1); recentFolders.unshift(p); recentFolders = recentFolders.slice(0,5); saveRecents();
+		}
+		function openRecentFile(path) {
+			return (async () => {
+				try {
+					const res = await window.bridge.readFileByPath(path);
+					if (res && typeof res.content === 'string') {
+						addRecentFile(path);
+						openInTabSafe(path, res.content);
+					}
+				} catch {}
+			})();
+		}
+		function openRecentFolder(path) {
+			return (async () => {
+				try {
+					const payload = await window.bridge.readFolderTree(path);
+					if (payload && payload.ok && payload.root) {
+						addRecentFolder(path);
+						currentWorkspaceRoot = payload.root;
+						if (window.bargeRenderTree) window.bargeRenderTree(payload.root, payload.tree); else renderTree(payload.root, payload.tree, collectTreeState());
+						updateEmptyState();
+					}
+				} catch {}
+			})();
+		}
+		function createRecentPopover(items, onPick) {
+			const wrap = document.createElement('div');
+			wrap.className = 'recent-popover';
+			if (!items || !items.length) {
+				const empty = document.createElement('div'); empty.className = 'recent-item'; empty.textContent = 'No recent items'; wrap.appendChild(empty);
+				return wrap;
+			}
+			for (const p of items) {
+				const btn = document.createElement('button'); btn.className = 'recent-item';
+				const name = (p.split('/').pop() || p);
+				btn.innerHTML = `<div><div>${name}</div><div class="path">${p}</div></div>`;
+				btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); onPick(p); hideRecentPopovers(); });
+				wrap.appendChild(btn);
+			}
+			return wrap;
+		}
+		function hideRecentPopovers() { document.querySelectorAll('.recent-popover').forEach(el => el.remove()); }
+		function toggleRecentPopoverFor(anchorBtn, kind) {
+	const dropdown = anchorBtn?.closest('.dropdown'); if (!dropdown) return;
+	const existing = dropdown.querySelector('.recent-popover');
+	if (existing) { existing.remove(); return; }
+	hideRecentPopovers();
+	const data = kind === 'file' ? recentFiles : recentFolders;
+	const pop = createRecentPopover(data, (p) => kind === 'file' ? openRecentFile(p) : openRecentFolder(p));
+	dropdown.style.position = 'relative';
+	dropdown.appendChild(pop);
+	requestAnimationFrame(() => pop.classList.add('show'));
+	const close = (e) => { if (!dropdown.contains(e.target)) { hideRecentPopovers(); document.removeEventListener('click', close, true); } };
+	setTimeout(() => document.addEventListener('click', close, true), 0);
+}
+
+	// Bind recent popovers and view actions inside scope
+	safeBind(mFileOpenRecentFile, 'click', (e) => { e.preventDefault(); e.stopPropagation(); showRecentModal('file'); });
+	safeBind(mFileOpenRecentFolder, 'click', (e) => { e.preventDefault(); e.stopPropagation(); showRecentModal('folder'); });
+	
+	safeBind(mViewFullScreen, 'click', (e) => { e.preventDefault(); e.stopPropagation(); window.bridge?.window?.toggleFullScreen?.(); });
+	safeBind(mViewZenMode, 'click', (e) => { e.preventDefault(); e.stopPropagation(); document.body.classList.toggle('zen'); });
+
+	function showRecentModal(kind) {
+		const modal = document.getElementById('recentModal'); if (!modal) return;
+		const list = document.getElementById('recentList');
+		const title = document.getElementById('recentTitle');
+		const btnFile = document.getElementById('recentSwitchFile');
+		const btnFolder = document.getElementById('recentSwitchFolder');
+		const cancel = document.getElementById('recentCancel');
+		let current = kind === 'folder' ? 'folder' : 'file';
+		function render() {
+			title.textContent = current === 'file' ? 'Open Recent File' : 'Open Recent Folder';
+			btnFile.classList.toggle('btn-primary', current === 'file');
+			btnFolder.classList.toggle('btn-primary', current === 'folder');
+			list.innerHTML = '';
+			const data = current === 'file' ? recentFiles : recentFolders;
+			if (!data || !data.length) {
+				const empty = document.createElement('div'); empty.className = 'recent-row'; empty.textContent = 'No recent items'; list.appendChild(empty); return;
+			}
+			for (const p of data) {
+				const row = document.createElement('button'); row.className = 'recent-row';
+				const name = (p.split('/').pop() || p);
+				row.innerHTML = `<div><div>${name}</div><div class="path">${p}</div></div>`;
+				row.addEventListener('click', (e) => {
+					e.preventDefault(); e.stopPropagation();
+					if (current === 'file') openRecentFile(p); else openRecentFolder(p);
+					hideRecentModal();
+				});
+				list.appendChild(row);
+			}
+		}
+		function hideRecentModal() { modal.classList.add('hidden'); }
+		modal.classList.remove('hidden');
+		render();
+		const onFile = () => { current = 'file'; render(); };
+		const onFolder = () => { current = 'folder'; render(); };
+		const onCancel = () => hideRecentModal();
+		btnFile.addEventListener('click', onFile);
+		btnFolder.addEventListener('click', onFolder);
+		cancel.addEventListener('click', onCancel);
+		const cleanup = () => {
+			btnFile.removeEventListener('click', onFile);
+			btnFolder.removeEventListener('click', onFolder);
+			cancel.removeEventListener('click', onCancel);
+			modal.removeEventListener('keydown', onKey);
+		};
+		function onKey(e) { if (e.key === 'Escape') { hideRecentModal(); cleanup(); } }
+		modal.addEventListener('keydown', onKey);
+	}
+});
