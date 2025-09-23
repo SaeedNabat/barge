@@ -65,6 +65,7 @@ ipcMain.handle('window:maximizeToggle', () => {
 	if (mainWindow.isMaximized()) mainWindow.unmaximize(); else mainWindow.maximize();
 });
 ipcMain.handle('window:close', () => { mainWindow?.close(); });
+ipcMain.handle('window:new', async () => { try { await createWindow(); } catch (e) { console.error('new window failed', e); } });
 
 ipcMain.handle('window:setOpacity', (_evt, value) => {
 	try { const v = Math.max(0.6, Math.min(1, Number(value) || 1)); mainWindow?.setOpacity(v); } catch {}

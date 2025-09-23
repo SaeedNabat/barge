@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld('bridge', {
 		close: () => ipcRenderer.invoke('window:close'),
 		setOpacity: (value) => ipcRenderer.invoke('window:setOpacity', value),
 		toggleFullScreen: () => ipcRenderer.invoke('window:toggleFullScreen'),
+		newWindow: () => ipcRenderer.invoke('window:new'),
 	},
 	onFileOpened: (callback) => { fileOpenedListeners.add(callback); return () => fileOpenedListeners.delete(callback); },
 	onFileSaved: (callback) => { fileSavedListeners.add(callback); return () => fileSavedListeners.delete(callback); },

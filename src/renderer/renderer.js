@@ -215,6 +215,8 @@ const settings = {
 	wordWrap: 'off', // off | on
 	lineNumbers: 'on', // on | off
 	renderWhitespace: 'none', // none | all | selection
+	cursorBlinkMs: 1200,
+	statusBarVisible: true,
 };
 
 function loadSettings() {
@@ -236,8 +238,20 @@ function applySettings() {
 		const appEl = document.querySelector('.app');
 		if (appEl) appEl.style.opacity = String(settings.appOpacity || 1);
 		
+		// Apply cursor blink duration CSS variable (used by custom cursor animation)
+		try { document.documentElement.style.setProperty('--cursor-blink-duration', `${Math.max(300, Math.min(3000, parseInt(settings.cursorBlinkMs || 1200, 10)))}ms`); } catch {}
+		
+		// Apply status bar visibility via grid row class for animation
+		try {
+			const main = document.querySelector('.main');
+			if (main) main.classList.toggle('statusbar-hidden', !settings.statusBarVisible);
+		} catch {}
+		
 		// Update terminal theme if terminal exists
 		updateTerminalTheme();
+		
+		// Reflect state in View menu
+		updateViewMenuState?.();
 	}
 
 function getTerminalThemeForCurrentSettings() {
@@ -309,6 +323,34 @@ function updateEmptyState() {
 	const hasAny = openTabs.length > 0 || !!currentWorkspaceRoot;
 	modal?.classList.add('hidden');
 	if (sidebarWelcome) sidebarWelcome.style.display = hasAny ? 'none' : 'block';
+	// Also update editor enabled state whenever empty state changes
+	updateEditorEnabled();
+	// Toggle file tree filter visibility based on folder presence
+	const fileTreeFilterWrap = document.querySelector('.file-tree-filter');
+	if (fileTreeFilterWrap) {
+		if (currentWorkspaceRoot) {
+			fileTreeFilterWrap.style.display = 'block';
+		} else {
+			fileTreeFilterWrap.style.display = 'none';
+			const inp = document.getElementById('fileTreeFilter');
+			if (inp) inp.value = '';
+			// Clear any filtering
+			const fileTreeEl = document.getElementById('fileTree');
+			fileTreeEl?.querySelectorAll('.filtered-out').forEach(n => n.classList.remove('filtered-out'));
+		}
+	}
+}
+
+// Disable editor when there is no active file/model
+function updateEditorEnabled() {
+	try {
+		const hasActive = !!editor && openTabs.length > 0 && !!activeTabPath && !!modelsByPath.get(activeTabPath);
+		editor?.updateOptions({ readOnly: !hasActive });
+		const editorContainer = document.getElementById('editor');
+		if (editorContainer) editorContainer.classList.toggle('disabled', !hasActive);
+		const editorEmpty = document.getElementById('editorEmpty');
+		if (editorEmpty) editorEmpty.classList.toggle('hidden', hasActive);
+	} catch {}
 }
 
 // Early bootstrap to ensure clicks work even if Monaco hasn't finished loading
@@ -323,11 +365,18 @@ window.addEventListener('DOMContentLoaded', () => {
 		if (!btn) return;
 		const id = btn.id;
 		if (id === 'mFileOpenRecentFile' || id === 'mFileOpenRecentFolder') {
-			// Keep menu open to show the recent popover
 			return;
 		}
 		menubar.querySelectorAll('.menu.open').forEach(el => el.classList.remove('open'));
 	});
+	// Refresh View menu state when opening/hovering View menu
+	const viewMenu = document.querySelector('.menu[data-menu="view"]');
+	if (viewMenu) {
+		const dd = viewMenu.querySelector('.dropdown');
+		viewMenu.addEventListener('mouseenter', () => updateViewMenuState?.());
+		viewMenu.addEventListener('focusin', () => updateViewMenuState?.());
+		dd?.addEventListener('transitionend', () => updateViewMenuState?.());
+	}
 
 	async function openFileFlow() {
 		if (isOpeningFile) return; isOpeningFile = true;
@@ -376,6 +425,7 @@ window.addEventListener('DOMContentLoaded', () => {
 		}
 	}, true);
 
+	const mFileNewWindow = document.getElementById('mFileNewWindow');
 	const mFileOpen = document.getElementById('mFileOpen');
 	const mFileOpenFolder = document.getElementById('mFileOpenFolder');
 	const mFileSave = document.getElementById('mFileSave');
@@ -395,6 +445,9 @@ const mViewToggleSidebar = document.getElementById('mViewToggleSidebar');
 const mViewFullScreen = document.getElementById('mViewFullScreen');
 const mViewZenMode = document.getElementById('mViewZenMode');
 	const prefsModal = document.getElementById('prefsModal');
+	const mViewToggleStatus = document.getElementById('mViewToggleStatus');
+	const mViewToggleWordWrap = document.getElementById('mViewToggleWordWrap');
+	const mViewToggleLineNumbers = document.getElementById('mViewToggleLineNumbers');
 	const prefFontFamily = document.getElementById('prefFontFamily');
 	const prefFontSize = document.getElementById('prefFontSize');
 	const prefAppOpacity = document.getElementById('prefAppOpacity');
@@ -403,6 +456,8 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const autoSaveDelayField = document.getElementById('autoSaveDelayField');
 	const prefsSave = document.getElementById('prefsSave');
 	const prefsCancel = document.getElementById('prefsCancel');
+	const prefCursorBlink = document.getElementById('prefCursorBlink');
+	const prefCursorBlinkVal = document.getElementById('prefCursorBlinkVal');
 
 	const mFileNew = document.getElementById('mFileNew');
 	const newFileBtn = document.getElementById('sidebarNewFile');
@@ -418,14 +473,6 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const aboutClose = document.getElementById('aboutClose');
 
 	const mEditFind = document.getElementById('mEditFind');
-	const mEditFindInFiles = document.getElementById('mEditFindInFiles');
-	const searchPanel = document.getElementById('searchPanel');
-	const searchRun = document.getElementById('searchRun');
-	const searchQuery = document.getElementById('searchQuery');
-	const searchCase = document.getElementById('searchCase');
-	const searchRegex = document.getElementById('searchRegex');
-	const searchResults = document.getElementById('searchResults');
-	const searchClear = document.getElementById('searchClear');
 
 	const cmdPalette = document.getElementById('cmdPalette');
 	const cmdBackdrop = document.getElementById('cmdBackdrop');
@@ -534,9 +581,8 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 			{ id: 'file:reopenClosed', title: 'File: Reopen Closed Tab', run: () => mFileReopenClosed?.click() },
 			{ id: 'file:saveAs', title: 'File: Save As…', hint: 'Ctrl+Shift+S', run: () => mFileSaveAs?.click() },
 			{ id: 'edit:find', title: 'Edit: Find', hint: 'Ctrl+F', run: () => mEditFind?.click() },
-			{ id: 'edit:findInFiles', title: 'Edit: Find in Files', hint: 'Ctrl+Shift+F', run: () => mEditFindInFiles?.click() },
 			{ id: 'edit:goToLine', title: 'Edit: Go to Line…', hint: 'Ctrl+G', run: () => mEditGoToLine?.click() },
-			{ id: 'view:toggleStatusBar', title: 'View: Toggle Status Bar', run: () => { const sb = document.querySelector('.statusbar'); if (sb) sb.style.display = (sb.style.display === 'none' ? '' : 'none'); } },
+			{ id: 'view:toggleStatusBar', title: 'View: Toggle Status Bar', run: () => mViewToggleStatus?.click() },
 			{ id: 'view:toggleTheme', title: 'View: Toggle Theme (Dark/Light)', run: () => { settings.theme = settings.theme === 'light' ? 'dark' : 'light'; saveSettings(); applySettings(); } },
 			{ id: 'view:toggleWordWrap', title: 'View: Toggle Word Wrap', hint: 'Alt+Z', run: () => mViewToggleWordWrap?.click() },
 			{ id: 'view:toggleLineNumbers', title: 'View: Toggle Line Numbers', run: () => mViewToggleLineNumbers?.click() },
@@ -547,6 +593,7 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	buildCommands();
 	loadCmdHistory();
 
+	safeBind(mFileNewWindow, 'click', () => window.bridge?.window?.newWindow?.());
 	safeBind(mFileOpen, 'click', openFileFlow);
 	safeBind(mFileOpenFolder, 'click', openFolderFlow);
 	safeBind(mFileSave, 'click', async () => { if (window.__saveActive) { await window.__saveActive(); } else { window.__PENDING_SAVE_ACTIVE__ = true; } });
@@ -576,34 +623,43 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	safeBind(mEditPreferences, 'click', () => { if (typeof openPrefs === 'function') openPrefs(); else setTimeout(() => openPrefs?.(), 100); });
 	safeBind(mThemeDark, 'click', () => { settings.theme = 'dark'; saveSettings(); applySettings(); });
 	safeBind(mThemeLight, 'click', () => { settings.theme = 'light'; saveSettings(); applySettings(); });
-safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.classList.toggle('sidebar-hidden'); saveSettings(); });
+	safeBind(mViewToggleStatus, 'click', () => { settings.statusBarVisible = !settings.statusBarVisible; saveSettings(); applySettings(); });
+ safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.classList.toggle('sidebar-hidden'); saveSettings(); });
 
-	function openPrefs() { prefFontFamily.value = settings.fontFamily; prefFontSize.value = settings.fontSize; if (prefAppOpacity) prefAppOpacity.value = String(settings.appOpacity || 1); prefAutoSave.value = settings.autoSave; prefAutoSaveDelay.value = settings.autoSaveDelay; autoSaveDelayField.style.display = settings.autoSave === 'afterDelay' ? 'grid' : 'none'; prefsModal.classList.remove('hidden'); }
+	function openPrefs() {
+		prefFontFamily.value = settings.fontFamily;
+		prefFontSize.value = settings.fontSize;
+		if (prefAppOpacity) prefAppOpacity.value = String(settings.appOpacity || 1);
+		prefAutoSave.value = settings.autoSave;
+		prefAutoSaveDelay.value = settings.autoSaveDelay;
+		if (prefCursorBlink) {
+			const val = Math.max(300, Math.min(3000, parseInt(settings.cursorBlinkMs || 1200, 10)));
+			prefCursorBlink.value = String(val);
+			if (prefCursorBlinkVal) prefCursorBlinkVal.textContent = `${val} ms`;
+		}
+		autoSaveDelayField.style.display = settings.autoSave === 'afterDelay' ? 'grid' : 'none';
+		prefsModal.classList.remove('hidden');
+	}
 	function closePrefs() { prefsModal.classList.add('hidden'); }
 
 	safeBind(prefsCancel, 'click', closePrefs);
+	if (prefCursorBlink) {
+		safeBind(prefCursorBlink, 'input', () => { if (prefCursorBlinkVal) prefCursorBlinkVal.textContent = `${prefCursorBlink.value} ms`; });
+	}
 	safeBind(prefAutoSave, 'change', () => { autoSaveDelayField.style.display = prefAutoSave.value === 'afterDelay' ? 'grid' : 'none'; });
-	safeBind(prefsSave, 'click', () => { settings.fontFamily = prefFontFamily.value || settings.fontFamily; settings.fontSize = Math.max(8, Math.min(48, parseInt(prefFontSize.value || settings.fontSize, 10))); settings.appOpacity = Math.max(0.6, Math.min(1, parseFloat((prefAppOpacity && prefAppOpacity.value) ? prefAppOpacity.value : String(settings.appOpacity || 1)))); settings.autoSave = prefAutoSave.value; settings.autoSaveDelay = Math.max(100, Math.min(10000, parseInt(prefAutoSaveDelay.value || settings.autoSaveDelay, 10))); saveSettings(); applySettings(); closePrefs(); });
+	safeBind(prefsSave, 'click', () => {
+		settings.fontFamily = prefFontFamily.value || settings.fontFamily;
+		settings.fontSize = Math.max(8, Math.min(48, parseInt(prefFontSize.value || settings.fontSize, 10)));
+		settings.appOpacity = Math.max(0.6, Math.min(1, parseFloat((prefAppOpacity && prefAppOpacity.value) ? prefAppOpacity.value : String(settings.appOpacity || 1))));
+		settings.autoSave = prefAutoSave.value;
+		settings.autoSaveDelay = Math.max(100, Math.min(10000, parseInt(prefAutoSaveDelay.value || settings.autoSaveDelay, 10)));
+		if (prefCursorBlink && prefCursorBlink.value) settings.cursorBlinkMs = Math.max(300, Math.min(3000, parseInt(prefCursorBlink.value, 10)));
+		saveSettings();
+		applySettings();
+		closePrefs();
+	});
 
 	safeBind(mEditFind, 'click', () => { editor?.getAction('actions.find')?.run(); });
-	safeBind(mEditFindInFiles, 'click', () => { searchPanel.classList.toggle('hidden'); searchQuery.focus(); });
-
-	safeBind(searchRun, 'click', async () => {
-		if (!currentWorkspaceRoot) return;
-		searchResults.innerHTML = '';
-		const q = searchQuery.value;
-		if (!q) return;
-		const res = await window.bridge.searchInFolder({ root: currentWorkspaceRoot, query: q, caseSensitive: searchCase.checked, isRegex: searchRegex.checked });
-		for (const r of res) {
-			const item = document.createElement('div'); item.className = 'result-item';
-			item.addEventListener('click', async () => { const file = await window.bridge.readFileByPath(r.filePath); openInTabSafe(r.filePath, file?.content ?? ''); if (editor) { const model = editor.getModel(); if (model) { const line = r.line; const col = (r.matches[0]?.start || 0) + 1; editor.revealPositionInCenter({ lineNumber: line, column: col }); editor.setPosition({ lineNumber: line, column: col }); } } });
-			const fileEl = document.createElement('div'); fileEl.className = 'result-file'; fileEl.textContent = `${r.filePath}:${r.line}`;
-			const lineEl = document.createElement('div'); lineEl.className = 'result-line';
-			lineEl.innerHTML = highlightPreview(r.preview, r.matches);
-			item.appendChild(fileEl); item.appendChild(lineEl);
-			searchResults.appendChild(item);
-		}
-	});
 
 	safeBind(mEditGoToLine, 'click', async () => {
 		if (!editor) return;
@@ -623,11 +679,20 @@ safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.cl
 	});
 
 	safeBind(mViewToggleWordWrap, 'click', () => { settings.wordWrap = settings.wordWrap === 'off' ? 'on' : 'off'; saveSettings(); applySettings(); });
-	safeBind(mViewToggleLineNumbers, 'click', () => { settings.lineNumbers = settings.lineNumbers === 'on' ? 'off' : 'on'; saveSettings(); applySettings(); });
+	// Animated toggle for line numbers
+	safeBind(mViewToggleLineNumbers, 'click', () => {
+		const editorEl = document.getElementById('editor');
+		if (editorEl) {
+			editorEl.classList.add('ln-anim');
+			setTimeout(() => editorEl.classList.remove('ln-anim'), 320);
+		}
+		settings.lineNumbers = settings.lineNumbers === 'on' ? 'off' : 'on';
+		saveSettings();
+		applySettings();
+	});
 	safeBind(mViewToggleWhitespace, 'click', () => {
-		const order = ['none', 'selection', 'all'];
-		const idx = order.indexOf(settings.renderWhitespace);
-		settings.renderWhitespace = order[(idx + 1) % order.length];
+		// Toggle directly between none and all to avoid double clicks
+		settings.renderWhitespace = settings.renderWhitespace === 'all' ? 'none' : 'all';
 		saveSettings(); applySettings();
 	});
 
@@ -638,11 +703,29 @@ safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.cl
 		if (e.ctrlKey && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); editor?.trigger('kb', 'redo', null); }
 		if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); mFileSave?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); mFileSaveAs?.click(); }
-		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') { e.preventDefault(); mEditFindInFiles?.click(); }
+		// Ctrl+Shift+F removed: Find in Files panel no longer exists
 		if (e.ctrlKey && e.key.toLowerCase() === 'g') { e.preventDefault(); mEditGoToLine?.click(); }
 		if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'z') { e.preventDefault(); mViewToggleWordWrap?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); openCmdPalette(); }
+		// Ctrl+K, Z chord for Zen Mode
+		if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+			// wait for next key
+			e.preventDefault();
+			let handled = false;
+			function onKey(ev) {
+				if (handled) return;
+				handled = true;
+				document.removeEventListener('keydown', onKey, true);
+				if (ev.key.toLowerCase() === 'z') {
+					ev.preventDefault();
+					mViewZenMode?.click();
+				}
+			}
+			document.addEventListener('keydown', onKey, true);
+			setTimeout(() => { if (!handled) { document.removeEventListener('keydown', onKey, true); } }, 800);
+		}
 		if (e.ctrlKey && e.key.toLowerCase() === 'n') { e.preventDefault(); mFileNew?.click(); }
+		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault(); mFileNewWindow?.click(); }
 	if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); mViewToggleSidebar?.click(); }
 	});
 
@@ -919,6 +1002,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 				setTimeout(() => applyTerminalResizeFor(termId), 60);
 			}
 		}
+		updateViewMenuState?.();
 	});
 		// Fixed terminal initialization with improved xterm loading
 		async function ensureTerminal() {
@@ -1130,7 +1214,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		console.log('Manual terminal initialization triggered');
 		await ensureTerminal();
 	};
-		});
+});
 
 		// Add missing functions for file tree and editor functionality
 		function iconSvg(kind, filename = '') {
@@ -1443,6 +1527,8 @@ document.addEventListener('DOMContentLoaded', () => {
 			} else {
 				console.log('Not auto-saving - either not onFocusChange or untitled file');
 			}
+			// Ensure editor is enabled once a tab is active
+			updateEditorEnabled();
 		}
 
 		function markDirty(filePath, isDirty) { 
@@ -1496,16 +1582,13 @@ document.addEventListener('DOMContentLoaded', () => {
 						console.log('Clearing editor directly');
 						editor.setValue('');
 						editor.updateOptions({ language: 'plaintext' });
-						console.log('Editor cleared directly');
-					} else {
-						console.log('Editor not available for direct clearing');
-					}
-					const filenameEl = document.getElementById('filename');
-					if (filenameEl) {
-						filenameEl.textContent = '';
-						console.log('Filename cleared directly');
 					}
 					activeTabPath = null;
+					filenameEl.textContent = '';
+					langEl.textContent = '';
+					updateStatus();
+					// Disable editor when no tabs remain
+					updateEditorEnabled();
 				}
 			}
 		}
@@ -1769,6 +1852,45 @@ document.addEventListener('DOMContentLoaded', () => {
 		const tabsEl = document.getElementById('tabs');
 		const cursorPosEl = document.getElementById('cursorPos');
 		const langEl = document.getElementById('lang');
+		const fileTreeFilter = document.getElementById('fileTreeFilter');
+		if (fileTreeFilter) {
+			const applyTreeFilter = () => {
+				const fileTreeEl = document.getElementById('fileTree');
+				if (!fileTreeEl) return;
+				const inputEl = document.getElementById('fileTreeFilter');
+				const q = (inputEl?.value || '').trim();
+				// If query is empty, clear any previous filtering and show everything
+				if (!q) {
+					fileTreeEl.querySelectorAll('.filtered-out').forEach(n => n.classList.remove('filtered-out'));
+					return;
+				}
+				const items = fileTreeEl.querySelectorAll('.item');
+				const ql = q.toLowerCase();
+				items.forEach(it => {
+					const type = it.dataset.type || '';
+					const nameEl = it.querySelector('span');
+					const name = (nameEl?.textContent || '').toLowerCase();
+					let match = false;
+					if (type === 'file') {
+						match = name.includes(ql);
+					} else {
+						// For directories: keep visible if self name matches OR any descendant file matches
+						match = name.includes(ql);
+						if (!match) {
+							const container = it.nextSibling && it.nextSibling.classList && it.nextSibling.classList.contains('children') ? it.nextSibling : null;
+							if (container) {
+								const childFiles = container.querySelectorAll('.item[data-type="file"]');
+								match = Array.from(childFiles).some(cf => (cf.querySelector('span')?.textContent || '').toLowerCase().includes(ql));
+							}
+						}
+					}
+					// Toggle target element: files toggle themselves; directories toggle their container (item + children)
+					const toggleEl = (type === 'dir') ? it.parentElement : it;
+					if (match) toggleEl?.classList?.remove('filtered-out'); else toggleEl?.classList?.add('filtered-out');
+				});
+			};
+			fileTreeFilter.addEventListener('input', applyTreeFilter);
+		}
 
 		// Initialize Monaco Editor
 		if (!window.__MONACO_BOOT__) {
@@ -1803,7 +1925,7 @@ document.addEventListener('DOMContentLoaded', () => {
 						'editor.lineHighlightBackground': '#f1f5f9',
 						'editor.selectionBackground': '#dbeafe',
 						'editor.selectionHighlightBackground': '#e0e7ff',
-						'editorCursor.foreground': '#3b82f6',
+						'editorCursor.foreground': '#6366f1',
 						'editorWhitespace.foreground': '#cbd5e1',
 						'editorIndentGuide.background': '#e2e8f0',
 						'editorIndentGuide.activeBackground': '#cbd5e1',
@@ -1848,7 +1970,7 @@ document.addEventListener('DOMContentLoaded', () => {
 						'editor.lineHighlightBackground': '#0f1115',
 						'editor.selectionBackground': '#1e3a8a',
 						'editor.selectionHighlightBackground': '#1e40af',
-						'editorCursor.foreground': '#3b82f6',
+						'editorCursor.foreground': '#6366f1',
 						'editorWhitespace.foreground': '#374151',
 						'editorIndentGuide.background': '#1f2937',
 						'editorIndentGuide.activeBackground': '#374151',
@@ -1867,20 +1989,27 @@ document.addEventListener('DOMContentLoaded', () => {
 					}
 				});
 
-				// Create Monaco editor
-				editor = monacoRef.editor.create(editorContainer, {
-					value: '// Welcome to Barge Editor\n',
-					language: 'javascript',
-					theme: settings.theme === 'light' ? 'barge-light' : 'barge-dark',
-					automaticLayout: true,
-					minimap: { enabled: true },
-					fontFamily: settings.fontFamily,
-					fontSize: settings.fontSize,
-					autoClosingBrackets: 'languageDefined',
-					autoClosingQuotes: 'languageDefined',
-					bracketPairColorization: { enabled: true },
-					matchBrackets: 'always',
-				});
+			// Create Monaco editor
+			editor = monacoRef.editor.create(editorContainer, {
+				value: '// Welcome to Barge Editor\n',
+				language: 'javascript',
+				theme: settings.theme === 'light' ? 'barge-light' : 'barge-dark',
+				automaticLayout: true,
+				cursorBlinking: "smooth",
+				cursorSmoothCaretAnimation: "on",
+				cursorStyle: "line",
+				cursorWidth: 2,
+				minimap: { enabled: true },
+				fontFamily: settings.fontFamily,
+				fontSize: settings.fontSize,
+				autoClosingBrackets: 'languageDefined',
+				autoClosingQuotes: 'languageDefined',
+				cursorSurroundingLines: 3,
+				cursorSurroundingLinesStyle: "default",
+				smoothScrolling: true,
+				bracketPairColorization: { enabled: true },
+				matchBrackets: 'always'
+			});
 
 				// Set up editor event listeners
 				editor.onDidChangeCursorPosition(() => updateStatus());
@@ -1895,6 +2024,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 				// Apply all settings now that Monaco is ready
 				applySettings();
+				// Ensure correct enabled/disabled state on startup
+				updateEditorEnabled();
 
 				// Process any pending files now that Monaco is ready
 				if (window.__PENDING_OPEN__) {
@@ -2035,3 +2166,36 @@ document.addEventListener('DOMContentLoaded', () => {
 		modal.addEventListener('keydown', onKey);
 	}
 });
+
+function updateViewMenuState() {
+	try {
+		const dark = document.getElementById('mThemeDark');
+		const light = document.getElementById('mThemeLight');
+		const statusBtn = document.getElementById('mViewToggleStatus');
+		const ww = document.getElementById('mViewToggleWordWrap');
+		const ln = document.getElementById('mViewToggleLineNumbers');
+		// Theme
+		dark?.classList.toggle('active', settings.theme === 'dark');
+		light?.classList.toggle('active', settings.theme === 'light');
+		dark?.setAttribute('aria-checked', String(settings.theme === 'dark'));
+		light?.setAttribute('aria-checked', String(settings.theme === 'light'));
+		// Status bar
+		const sbVisible = !!settings.statusBarVisible;
+		statusBtn?.classList.toggle('active', sbVisible);
+		statusBtn?.setAttribute('aria-checked', String(sbVisible));
+		// Terminal
+		const term = document.getElementById('terminalPanel') || document.querySelector('.terminal');
+		const termBtn = document.getElementById('mViewToggleTerminal');
+		const termVisible = !!term && !term.classList.contains('hidden');
+		termBtn?.classList.toggle('active', termVisible);
+		termBtn?.setAttribute('aria-checked', String(termVisible));
+		// Word wrap
+		const wwOn = settings.wordWrap === 'on';
+		ww?.classList.toggle('active', wwOn);
+		ww?.setAttribute('aria-checked', String(wwOn));
+		// Line numbers
+		const lnOn = settings.lineNumbers === 'on';
+		ln?.classList.toggle('active', lnOn);
+		ln?.setAttribute('aria-checked', String(lnOn));
+	} catch {}
+}
