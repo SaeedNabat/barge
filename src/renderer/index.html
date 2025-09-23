@@ -37,6 +37,7 @@
 						<button class="menu-item" id="mFileNew"><span>New File</span><kbd>Ctrl+N</kbd></button>
 						<button class="menu-item" id="mFileNewWindow"><span>New Window</span><kbd>Ctrl+Shift+N</kbd></button>
 						<button class="menu-item" id="mFileOpen"><span>Open…</span><kbd>Ctrl+O</kbd></button>
+						<button class="menu-item" id="mFileQuickOpen"><span>Quick Open…</span><kbd>Ctrl+P</kbd></button>
 						<button class="menu-item" id="mFileOpenFolder"><span>Open Folder…</span><kbd>Ctrl+K Ctrl+O</kbd></button>
 						<button class="menu-item" id="mFileSave"><span>Save</span><kbd>Ctrl+S</kbd></button>
 						<button class="menu-item" id="mFileSaveAll"><span>Save All</span></button>
@@ -65,6 +66,8 @@
 					<span class="menu-label">View</span>
 					<div class="dropdown">
 						<button class="menu-item" id="mViewToggleSidebar"><span>Toggle Sidebar</span><kbd>Ctrl+B</kbd></button>
+						<button class="menu-item" id="mViewSplit"><span>Split Editor</span></button>
+						<button class="menu-item" id="mViewUnsplit"><span>Unsplit Editor</span></button>
 						<div class="menu-item" style="pointer-events:none; opacity:.8;">Theme</div>
 						<button class="menu-item" id="mThemeDark"><span>Dark</span></button>
 						<button class="menu-item" id="mThemeLight"><span>Light</span></button>
@@ -129,7 +132,9 @@
 							<span id="filename"></span>
 						</div>
 					</header>
-					<div id="editor">
+					<div id="editorSplit" class="editor-split">
+						<div id="editor"></div>
+						<div id="editor2" class="hidden"></div>
 						<div id="editorEmpty" class="editor-empty hidden"><div><div class="title">Welcome to Barge Editor</div><div class="subtitle">Open a file or folder to get started</div></div></div>
 					</div>
 					<div id="terminalPanel" class="terminal hidden">
@@ -147,6 +152,20 @@
 			</div>
 		</div>
 		<!-- modals below -->
+		<!-- Quick Open -->
+		<div id="quickOpen" class="modal hidden">
+			<div class="modal-backdrop"></div>
+			<div class="modal-card qo-card">
+				<div class="cmd-input-wrap">
+					<span class="input-icon" aria-hidden="true">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+					</span>
+					<input id="qoInput" type="text" placeholder="Type to search files…" autocomplete="off" />
+				</div>
+				<div id="qoList" class="cmd-list"></div>
+				<div id="qoEmpty" class="cmd-empty hidden">No matches. Start typing to search.</div>
+			</div>
+		</div>
 		<div id="prefsModal" class="modal hidden">
 			<div class="modal-backdrop"></div>
 			<div class="modal-card">

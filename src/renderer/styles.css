@@ -191,6 +191,7 @@ body.theme-light .topbar {
 }
 
 .tabs { display: flex; gap: 6px; align-items: stretch; overflow: auto; }
+.tabs, .tab, .tab .title { user-select: none; }
 .tab {
 	background: linear-gradient(180deg, rgba(20, 24, 36, 0.9), rgba(16, 21, 33, 0.9));
 	border: 1px solid rgba(75, 85, 99, 0.3);
@@ -1049,11 +1050,35 @@ body.theme-light .monaco-editor .current-line {
 	}
 }
 
+/* Editor split layout */
+.editor-split { position: relative; min-height: 0; height: 100%; display: grid; grid-template-columns: 1fr; }
+.editor-split.split-on { grid-template-columns: 1fr 1fr; gap: 2px; }
+#editor, #editor2 { min-height: 0; }
+#editor2.hidden { display: none; }
+.editor-split.split-on #editor2.hidden { display: block; }
+.editor-split.split-on #editor, .editor-split.split-on #editor2 { border-left: 1px solid rgba(255,255,255,0.06); }
+body.theme-light .editor-split.split-on #editor, body.theme-light .editor-split.split-on #editor2 { border-left-color: rgba(0,0,0,0.06); }
+
+/* Quick Open modal uses command palette visuals */
+.qo-card { width: min(720px, 92vw); }
+#quickOpen:not(.hidden) #qoInput ~ #qoList, #quickOpen:not(.hidden) #qoEmpty { display: block; }
+#qoInput { width: 100%; padding: 12px 14px 12px 34px; border: none; outline: none; background: rgba(255,255,255,0.06); color: #e5e7eb; font-size: 14px; border-top-left-radius: 12px; border-top-right-radius: 12px; border-bottom: 1px solid rgba(148,163,184,0.18); }
+body.theme-light #qoInput { background: rgba(0,0,0,0.035); color: #0f172a; border-bottom-color: rgba(0,0,0,0.08); }
+#qoList { max-height: 50vh; overflow: auto; padding: 8px; display: grid; gap: 6px; }
+.qo-card .cmd-item { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; padding: 10px 12px; border-radius: 8px; cursor: pointer; color: #cbd5e1; background: transparent; border: 1px solid transparent; transition: background var(--dur-short) var(--ease-standard), border-color var(--dur-short) var(--ease-standard), transform var(--dur-short) var(--ease-standard); }
+.qo-card .cmd-item:hover { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.25); transform: translateY(-1px); }
+.qo-card .cmd-item.selected { background: rgba(99,102,241,0.16); border-color: rgba(99,102,241,0.35); }
+.qo-card .cmd-item .hint { color: #94a3b8; font-size: 12px; }
+body.theme-light .qo-card .cmd-item { color: #0f172a; }
+body.theme-light .qo-card .cmd-item:hover { background: rgba(59,130,246,0.10); border-color: rgba(59,130,246,0.25); }
+body.theme-light .qo-card .cmd-item.selected { background: rgba(59,130,246,0.16); border-color: rgba(59,130,246,0.35); }
+/* Center empty-state in Quick Open */
+#qoEmpty { display: none; min-height: 30vh; display: flex; align-items: center; justify-content: center; text-align: center; color: #94a3b8; }
+body.theme-light #qoEmpty { color: #64748b; }
+
 /* Disabled editor state */
-#editor.disabled { pointer-events: none; }
-#editor.disabled .monaco-editor { opacity: .0; filter: grayscale(10%); }
-#editor.disabled .monaco-editor .view-lines { opacity: 0; }
-#editor.disabled .monaco-editor { display: none; }
+#editor.disabled .monaco-editor { opacity: .0; filter: grayscale(10%); display: none; }
+#editor2.disabled .monaco-editor { opacity: .0; filter: grayscale(10%); display: none; }
 
 .file-tree-filter { padding: 6px 6px 8px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; justify-content: center; }
 .file-tree-filter input { width: 92%; max-width: 240px; background: rgba(20,24,33,0.6); color: #e5e7eb; border: 1px solid rgba(148,163,184,0.22); border-radius: 8px; padding: 6px 10px; outline: none; transition: border-color var(--dur-short) var(--ease-standard), box-shadow var(--dur-short) var(--ease-standard); }
@@ -1082,3 +1107,6 @@ body.theme-light .file-tree-filter input::placeholder { color: #64748b; }
 .editor-empty .subtitle { font-size: 14px; font-weight: 500; opacity: .9; }
 .editor-empty.hidden { display: none; }
 body.theme-light .editor-empty { color: #64748b; }
+
+/* Drop indicator for tab DnD */
+.tab-drop-indicator { width: 2px; background: #6366f1; border-radius: 2px; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); margin: 2px 0; align-self: center; height: 24px; }

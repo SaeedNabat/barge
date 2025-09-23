@@ -32,6 +32,7 @@ function openInTabSafe(filePath, content) {
 }
 
 let monacoRef = null; let editor = null; let openTabs = []; let activeTabPath = null;
+let editor2Instance = null; let activePane = 'left';
 const modelsByPath = new Map(); const autosaveTimers = new Map();
 let closedStack = [];
 let currentWorkspaceRoot = null; let isOpeningFile = false; let isOpeningFolder = false;
@@ -232,6 +233,10 @@ function applySettings() {
 		monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
 	document.body.classList.toggle('theme-light', settings.theme === 'light');
 	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace });
+		if (editor2Instance) {
+			editor2Instance.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize, wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace });
+			monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
+		}
 		
 		// Apply app opacity (window-level if available)
 		try { window.bridge?.window?.setOpacity?.(settings.appOpacity || 1); } catch {}
@@ -348,8 +353,8 @@ function updateEditorEnabled() {
 		editor?.updateOptions({ readOnly: !hasActive });
 		const editorContainer = document.getElementById('editor');
 		if (editorContainer) editorContainer.classList.toggle('disabled', !hasActive);
-		const editorEmpty = document.getElementById('editorEmpty');
-		if (editorEmpty) editorEmpty.classList.toggle('hidden', hasActive);
+		const editor2Container = document.getElementById('editor2');
+		if (editor2Container) editor2Container.classList.toggle('disabled', !hasActive);
 	} catch {}
 }
 
@@ -426,6 +431,7 @@ window.addEventListener('DOMContentLoaded', () => {
 	}, true);
 
 	const mFileNewWindow = document.getElementById('mFileNewWindow');
+	const mFileQuickOpen = document.getElementById('mFileQuickOpen');
 	const mFileOpen = document.getElementById('mFileOpen');
 	const mFileOpenFolder = document.getElementById('mFileOpenFolder');
 	const mFileSave = document.getElementById('mFileSave');
@@ -480,6 +486,10 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const cmdInput = document.getElementById('cmdInput');
 	const cmdList = document.getElementById('cmdList');
 	const cmdEmpty = document.getElementById('cmdEmpty');
+	const quickOpen = document.getElementById('quickOpen');
+	const qoInput = document.getElementById('qoInput');
+	const qoList = document.getElementById('qoList');
+	const qoEmpty = document.getElementById('qoEmpty');
 
 	// Command palette state
 	let cmdItems = [];
@@ -1461,6 +1471,7 @@ document.addEventListener('DOMContentLoaded', () => {
 				openTabs.push(tab); 
 				const tabEl = document.createElement('div'); 
 				tabEl.className = 'tab'; 
+				tabEl.setAttribute('draggable', 'true');
 				const titleEl = document.createElement('div'); 
 				titleEl.className = 'title'; 
 				titleEl.textContent = tab.title; 
@@ -1491,6 +1502,7 @@ document.addEventListener('DOMContentLoaded', () => {
 				tab._el = tabEl; 
 				tab._titleEl = titleEl; 
 				tabsEl.appendChild(tabEl); 
+				attachTabDnD();
 			}
 			activateTab(filePath);
 			// Remove duplicate editor.setModel() call - it's already called in activateTab()
@@ -1502,33 +1514,21 @@ document.addEventListener('DOMContentLoaded', () => {
 			updateStatus();
 		}
 
-		function activateTab(filePath) { 
-			console.log('activateTab called with:', filePath);
-			console.log('Current openTabs:', openTabs.map(t => t.path));
-			console.log('activeTabPath before:', activeTabPath);
-			console.log('isUntitledPath:', isUntitledPath(filePath));
-			console.log('settings.autoSave:', settings.autoSave);
-			
-			activeTabPath = filePath; 
-			for (const t of openTabs) {
-				console.log('Setting active for tab:', t.path, 'should be active:', t.path === filePath);
-				t._el.classList.toggle('active', t.path === filePath); 
-			}
-			const model = modelsByPath.get(filePath); 
-			console.log('Model found:', !!model);
-			if (model) { 
-				editor.setModel(model); 
-				editor.focus(); 
-			} 
-			// Don't auto-save untitled files when switching tabs
-			if (settings.autoSave === 'onFocusChange' && !isUntitledPath(filePath)) {
-				console.log('Auto-saving non-untitled file');
-				saveActiveFile(); 
-			} else {
-				console.log('Not auto-saving - either not onFocusChange or untitled file');
-			}
-			// Ensure editor is enabled once a tab is active
-			updateEditorEnabled();
+		function activateTab(path) {
+			try {
+				const model = modelsByPath.get(path);
+				if (!model) return;
+				activeTabPath = path;
+				if (activePane === 'right' && editor2Instance) {
+					editor2Instance.setModel(model);
+					editor2Instance.focus();
+				} else {
+					editor.setModel(model);
+					editor.focus();
+				}
+				updateStatus();
+				updateEditorEnabled();
+			} catch (e) { console.error('activateTab failed', e); }
 		}
 
 		function markDirty(filePath, isDirty) { 
@@ -2165,6 +2165,135 @@ document.addEventListener('DOMContentLoaded', () => {
 		function onKey(e) { if (e.key === 'Escape') { hideRecentModal(); cleanup(); } }
 		modal.addEventListener('keydown', onKey);
 	}
+
+	function listAllFiles(rootEl) {
+		const out = [];
+		const walk = (el) => {
+			if (!el) return;
+			const items = el.children;
+			for (const n of items) {
+				if (!(n instanceof HTMLElement)) continue;
+				if (n.classList.contains('children')) { walk(n); continue; }
+				if (n.classList.contains('item')) {
+					const type = n.dataset?.type;
+					const path = n.dataset?.path;
+					if (type === 'file' && path) out.push(path);
+					const next = n.nextSibling;
+					if (next && next instanceof HTMLElement && next.classList.contains('children')) walk(next);
+				}
+			}
+		};
+		walk(rootEl);
+		return out;
+	}
+	function qoFuzzyScore(query, text) {
+		query = (query || '').toLowerCase();
+		text = (text || '').toLowerCase();
+		let score = 0, last = -1;
+		for (const ch of query) {
+			const idx = text.indexOf(ch, last + 1);
+			if (idx === -1) return -1;
+			score += (idx - last) <= 2 ? 3 : 1; last = idx;
+		}
+		return score + Math.max(0, 20 - (text.length - query.length));
+	}
+	function openQuickOpen() {
+		if (!quickOpen) return;
+		qoInput.value = '';
+		qoList.innerHTML = '';
+		qoEmpty.classList.add('hidden');
+		quickOpen.classList.remove('hidden');
+		setTimeout(() => qoInput.focus(), 0);
+		qoSelected = 0;
+	}
+	function closeQuickOpen() { quickOpen?.classList.add('hidden'); }
+	let qoSelected = 0; let qoRows = [];
+	function renderQuickOpen(query) {
+		qoList.innerHTML = '';
+		qoRows = [];
+		const fileTreeEl = document.getElementById('fileTree');
+		// De-duplicate files by path
+		const files = Array.from(new Set(listAllFiles(fileTreeEl)));
+		if (!query) {
+			qoEmpty.classList.remove('hidden');
+			return;
+		}
+		qoEmpty.classList.add('hidden');
+		const scored = files.map(p => ({ p, s: qoFuzzyScore(query, p.split('/').pop() || p) })).filter(x => x.s >= 0).sort((a,b) => b.s - a.s).slice(0, 200);
+		let idx = 0;
+		for (const { p } of scored) {
+			const row = document.createElement('div');
+			row.className = 'cmd-item' + (idx === qoSelected ? ' selected' : '');
+			const name = p.split('/').pop() || p;
+			row.innerHTML = `<div>${name}</div><div class="hint">${p}</div>`;
+			row.addEventListener('click', async () => {
+				closeQuickOpen();
+				const file = await window.bridge.readFileByPath(p);
+				openInTabSafe(p, file?.content ?? '');
+			});
+			qoList.appendChild(row);
+			qoRows.push({ el: row, path: p });
+			idx++;
+		}
+	}
+	function qoMove(selDelta) {
+		if (!qoRows.length) return;
+		qoSelected = Math.max(0, Math.min(qoRows.length - 1, qoSelected + selDelta));
+		qoRows.forEach((r, i) => r.el.classList.toggle('selected', i === qoSelected));
+		qoRows[qoSelected].el.scrollIntoView({ block: 'nearest' });
+	}
+	function qoOpenSelected() {
+		if (!qoRows.length) return;
+		const { path } = qoRows[qoSelected];
+		closeQuickOpen();
+		window.bridge.readFileByPath(path).then(file => openInTabSafe(path, file?.content ?? ''));
+	}
+	if (qoInput) {
+		qoInput.addEventListener('input', () => { qoSelected = 0; renderQuickOpen(qoInput.value); });
+		qoInput.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') { e.preventDefault(); closeQuickOpen(); return; }
+			if (e.key === 'ArrowDown') { e.preventDefault(); qoMove(1); return; }
+			if (e.key === 'ArrowUp') { e.preventDefault(); qoMove(-1); return; }
+			if (e.key === 'Enter') { e.preventDefault(); qoOpenSelected(); return; }
+		});
+	}
+	const editorSplit = document.getElementById('editorSplit');
+	const editor2 = document.getElementById('editor2');
+	const mViewSplit = document.getElementById('mViewSplit');
+	const mViewUnsplit = document.getElementById('mViewUnsplit');
+	function splitEditor() {
+		if (!editorSplit || !editor2) return;
+		editorSplit.classList.add('split-on');
+		editor2.classList.remove('hidden');
+		if (!editor2Instance && monacoRef) {
+			const opts = editor.getRawOptions?.() || {};
+			editor2Instance = monacoRef.editor.create(editor2, Object.assign({}, opts, {
+				automaticLayout: true,
+				theme: settings.theme === 'light' ? 'barge-light' : 'barge-dark'
+			}));
+			editor2Instance.onDidFocusEditorText?.(() => { activePane = 'right'; });
+			// Mirror current model
+			const current = editor.getModel?.();
+			if (current) editor2Instance.setModel(current);
+		}
+	}
+	function unsplitEditor() {
+		if (!editorSplit || !editor2) return;
+		editorSplit.classList.remove('split-on');
+		editor2.classList.add('hidden');
+		if (editor2Instance) { try { editor2Instance.dispose(); } catch {} editor2Instance = null; }
+		activePane = 'left';
+	}
+	safeBind(mViewSplit, 'click', splitEditor);
+	safeBind(mViewUnsplit, 'click', unsplitEditor);
+	safeBind(mFileQuickOpen, 'click', openQuickOpen);
+	// keyboard
+	document.addEventListener('keydown', (e) => {
+		if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); openQuickOpen(); }
+	}, true);
+
+		// After creating initial tabs or editor, ensure DnD is enabled
+		attachTabDnD();
 });
 
 function updateViewMenuState() {
@@ -2198,4 +2327,51 @@ function updateViewMenuState() {
 		ln?.classList.toggle('active', lnOn);
 		ln?.setAttribute('aria-checked', String(lnOn));
 	} catch {}
+}
+
+function attachTabDnD() {
+	const tabsEl = document.getElementById('tabs');
+	if (!tabsEl) return;
+	let dragEl = null;
+	let indicator = null;
+	function ensureIndicator() {
+		if (!indicator) { indicator = document.createElement('div'); indicator.className = 'tab-drop-indicator'; }
+		return indicator;
+	}
+	tabsEl.addEventListener('dragstart', (e) => {
+		const t = (e.target instanceof Element) ? e.target.closest('.tab') : null;
+		if (!t) return;
+		dragEl = t;
+		t.dataset.dragging = '1';
+		e.dataTransfer?.setData('text/plain', t.querySelector('.title')?.textContent || '');
+	});
+	tabsEl.addEventListener('dragend', () => { if (dragEl) { delete dragEl.dataset.dragging; dragEl = null; } if (indicator) { indicator.remove(); indicator = null; } });
+	tabsEl.addEventListener('dragover', (e) => {
+		e.preventDefault();
+		if (!dragEl) return;
+		const target = (e.target instanceof Element) ? e.target.closest('.tab') : null;
+		if (!target || target === dragEl) { if (indicator) indicator.remove(); return; }
+		const rect = target.getBoundingClientRect();
+		const after = (e.clientX - rect.left) > rect.width / 2;
+		const ind = ensureIndicator();
+		ind.remove();
+		if (after) target.after(ind); else target.before(ind);
+	});
+	tabsEl.addEventListener('drop', (e) => {
+		e.preventDefault();
+		if (!dragEl) return;
+		const target = (e.target instanceof Element) ? e.target.closest('.tab') : null;
+		if (!target || target === dragEl) return;
+		const rect = target.getBoundingClientRect();
+		const after = (e.clientX - rect.left) > rect.width / 2;
+		if (after) target.after(dragEl); else target.before(dragEl);
+		if (indicator) { indicator.remove(); indicator = null; }
+		// Rebuild openTabs order
+		const newOrder = Array.from(tabsEl.querySelectorAll('.tab')).map(el => {
+			const title = el.querySelector('.title')?.textContent || '';
+			return openTabs.find(t => t.title === title)?.path;
+		}).filter(Boolean);
+		const map = new Map(openTabs.map(t => [t.path, t]));
+		openTabs = newOrder.map(p => map.get(p)).filter(Boolean);
+	});
 }
