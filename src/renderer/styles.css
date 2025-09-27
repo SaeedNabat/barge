@@ -1199,3 +1199,61 @@ body.theme-light .problem-item:hover { background: rgba(59,130,246,0.10); }
 #editor .monaco-editor, #editor2 .monaco-editor { height: 100% !important; }
 #editor .monaco-editor .overflow-guard, #editor2 .monaco-editor .overflow-guard { height: 100% !important; }
 #editor .monaco-scrollable-element, #editor2 .monaco-scrollable-element { height: 100% !important; }
+
+/* Floating Action Button */
+.fab {
+	position: fixed;
+	bottom: 80px;
+	right: 24px;
+	width: 56px;
+	height: 56px;
+	border-radius: 50%;
+	border: none;
+	background: var(--color-accent, #3b82f6);
+	color: white;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.1);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: all var(--dur-medium) var(--ease-standard);
+	z-index: 1000;
+	opacity: 0.9;
+}
+
+.fab:hover {
+	opacity: 1;
+	transform: translateY(-2px);
+	box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2), 0 3px 6px rgba(0, 0, 0, 0.15);
+}
+
+.fab:active {
+	transform: translateY(0);
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.fab svg {
+	width: 24px;
+	height: 24px;
+}
+
+/* Dark theme FAB */
+body.theme-dark .fab {
+	background: var(--color-accent-dark, #60a5fa);
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+body.theme-dark .fab:hover {
+	box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4), 0 3px 6px rgba(0, 0, 0, 0.3);
+}
+
+body.theme-dark .fab:active {
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* Hide FAB when editor is not available */
+.fab.hidden {
+	opacity: 0;
+	pointer-events: none;
+	transform: scale(0.8);
+}

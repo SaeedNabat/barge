@@ -448,6 +448,9 @@ function updateEditorEnabled() {
 		editor?.updateOptions({ readOnly: !hasActive });
 		const editorContainer = document.getElementById('editor');
 		if (editorContainer) editorContainer.classList.toggle('disabled', !hasActive);
+		// Show/hide FAB based on editor state
+		const fab = document.getElementById('fabGoTop');
+		if (fab) fab.classList.toggle('hidden', !hasActive);
 		const editor2Container = document.getElementById('editor2');
 		if (editor2Container) editor2Container.classList.toggle('disabled', !hasActive);
 	} catch {}
@@ -554,7 +557,7 @@ const mViewFullScreen = document.getElementById('mViewFullScreen');
 const mViewZenMode = document.getElementById('mViewZenMode');
 	const prefsModal = document.getElementById('prefsModal');
 	const mViewToggleStatus = document.getElementById('mViewToggleStatus');
-	const goTopBtn = document.getElementById('goTop');
+	const fabGoTop = document.getElementById('fabGoTop');
 	const mViewToggleWordWrap = document.getElementById('mViewToggleWordWrap');
 	const mViewToggleLineNumbers = document.getElementById('mViewToggleLineNumbers');
 	const prefFontFamily = document.getElementById('prefFontFamily');
@@ -1649,6 +1652,9 @@ document.addEventListener('DOMContentLoaded', () => {
 			} catch (e) { console.error('activateTab failed', e); }
 		}
 
+		// Expose activateTab globally for context menu access
+		window.__activateTab = activateTab;
+
 		function markDirty(filePath, isDirty) { 
 			if (!filePath) return; 
 			const tab = openTabs.find(t => t.path === filePath); 
@@ -1688,10 +1694,18 @@ document.addEventListener('DOMContentLoaded', () => {
 				modelsByPath.delete(filePath);
 			}
 			if (activeTabPath === filePath) {
-				console.log('Closing active tab, switching to next tab or clearing editor');
+				console.log('Closing active tab, switching to tab to the left or clearing editor');
 				if (openTabs.length > 0) {
-					const nextTab = openTabs[0];
-					if (nextTab) activateTab(nextTab.path);
+					// Find the tab to the left of the closed tab
+					let nextTabPath = null;
+					if (tabIndex > 0) {
+						// Activate the tab to the left
+						nextTabPath = openTabs[tabIndex - 1].path;
+					} else if (openTabs.length > 0) {
+						// If we closed the first tab, activate the new first tab
+						nextTabPath = openTabs[0].path;
+					}
+					if (nextTabPath) activateTab(nextTabPath);
 				} else {
 					activeTabPath = null;
 					updateEditorEnabled();
@@ -1699,6 +1713,9 @@ document.addEventListener('DOMContentLoaded', () => {
 			}
 			saveSession();
 		}
+
+		// Expose closeTab globally for context menu access
+		window.__closeTab = closeTab;
 
 		// Move clearEditor inside the require callback where editor is accessible
 		function clearEditor() {
@@ -2302,7 +2319,7 @@ document.addEventListener('DOMContentLoaded', () => {
 				} catch {}
 
 					// Go to first line button
-					safeBind(goTopBtn, 'click', () => {
+					safeBind(fabGoTop, 'click', () => {
 						try {
 							const m = editor?.getModel?.();
 							if (!m) return;
@@ -2721,8 +2738,16 @@ function forceClosePath(targetPath) {
 		// Activate another tab if needed
 		if (activeTabPath === targetPath) {
 			if (openTabs.length > 0) {
-				const next = openTabs[0];
-				try { activateTab(next.path); } catch {}
+				// Find the tab to the left of the closed tab
+				let nextTabPath = null;
+				if (idx > 0) {
+					// Activate the tab to the left
+					nextTabPath = openTabs[idx - 1].path;
+				} else if (openTabs.length > 0) {
+					// If we closed the first tab, activate the new first tab
+					nextTabPath = openTabs[0].path;
+				}
+				if (nextTabPath) { try { activateTab(nextTabPath); } catch {} }
 			} else {
 				activeTabPath = null;
 				updateEditorEnabled();
