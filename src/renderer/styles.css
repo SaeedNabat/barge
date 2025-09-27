@@ -20,6 +20,9 @@ html, body {
 	overflow: hidden; /* prevent global scroll */
 }
 
+/* Generic spinner keyframes */
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .gradient-bg {
 	position: relative;
 	isolation: isolate;
@@ -79,6 +82,7 @@ html, body {
 	height: calc(100vh - 36px - 32px); /* subtract titlebar + menubar */
 	min-height: 0; /* allow children to size */
 	transition: grid-template-columns .18s ease-in-out;
+	overflow: hidden; /* prevent global horizontal overflow */
 }
 
 /* Sidebar toggle */
@@ -111,7 +115,32 @@ html, body {
 	/* Firefox */
 	scrollbar-width: thin;
 	scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+	position: relative; /* for loading overlay */
 }
+/* Loading overlay for file tree */
+.file-tree.loading { pointer-events: none; }
+.file-tree.loading::before {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: rgba(0,0,0,0.28);
+	backdrop-filter: blur(2px);
+	border-radius: 6px;
+}
+.file-tree.loading::after {
+	content: '';
+	position: absolute;
+	left: 50%; top: 30%;
+	width: 26px; height: 26px;
+	margin-left: -13px; margin-top: -13px;
+	border: 3px solid rgba(148,163,184,0.35);
+	border-top-color: #60a5fa;
+	border-right-color: #22d3ee;
+	border-radius: 50%;
+	animation: spin .9s linear infinite;
+	box-shadow: 0 2px 10px rgba(99,102,241,0.25);
+}
+
 /* WebKit */
 .file-tree::-webkit-scrollbar { width: 10px; }
 .file-tree::-webkit-scrollbar-track { background: transparent; }
@@ -159,10 +188,10 @@ body.theme-light .file-tree:hover::-webkit-scrollbar-thumb {
 
 .file-tree .item.deleting .label { transform: translateX(6px); opacity: 0.6; transition: transform var(--dur-medium) var(--ease-standard), opacity var(--dur-medium) var(--ease-standard); }
 
-.main { display: grid; grid-template-rows: 40px 1fr auto 24px; min-height: 0; }
+.main { display: grid; grid-template-rows: 48px 1fr auto 24px; min-height: 0; }
 /* Animate status bar row collapse */
 .main { transition: grid-template-rows var(--dur-medium) var(--ease-emph); }
-.main.statusbar-hidden { grid-template-rows: 40px 1fr auto 0px; }
+.main.statusbar-hidden { grid-template-rows: 48px 1fr auto 0px; }
 .statusbar { transition: height var(--dur-medium) var(--ease-emph), opacity var(--dur-short) var(--ease-standard); }
 .main.statusbar-hidden .statusbar { height: 0; opacity: 0; overflow: hidden; }
 
@@ -178,11 +207,12 @@ body.theme-light .file-tree:hover::-webkit-scrollbar-thumb {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	height: 40px;
+	height: 48px;
 	padding: 0 8px;
 	border-bottom: 1px solid rgba(255,255,255,0.06);
 	background: rgba(15, 17, 21, 0.55);
 	backdrop-filter: blur(8px);
+	overflow: hidden;
 }
 
 body.theme-light .topbar {
@@ -190,7 +220,20 @@ body.theme-light .topbar {
 	border-bottom-color: rgba(0, 0, 0, 0.06);
 }
 
-.tabs { display: flex; gap: 6px; align-items: stretch; overflow: auto; }
+.tabs { display: flex; gap: 6px; align-items: stretch; overflow: auto; background: transparent; }
+/* Make tab bar horizontally scrollable with no vertical overflow */
+.tabs { overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
+.tabs::-webkit-scrollbar { height: 14px; }
+.tabs::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.5); border-radius: 10px; }
+.tabs::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.7); }
+/* Firefox */
+.tabs { scrollbar-width: thin; }
+/* Reserve space so the scrollbar is not overlapped/clipped */
+.tabs { padding-bottom: 10px; scrollbar-gutter: stable both-edges; }
+/* Ensure tabs container can actually shrink and scroll within flex topbar */
+.tabs { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; }
+/* Prevent individual tabs from shrinking so horizontal overflow occurs */
+.tab { flex: 0 0 auto; }
 .tabs, .tab, .tab .title { user-select: none; }
 .tab {
 	background: linear-gradient(180deg, rgba(20, 24, 36, 0.9), rgba(16, 21, 33, 0.9));
@@ -215,6 +258,9 @@ body.theme-light .topbar {
 .tab .close:hover { background: rgba(255,255,255,0.08); color: #e2e8f0; }
 .tab.active { background: linear-gradient(180deg, rgba(38, 44, 66, 0.95), rgba(23, 29, 48, 0.95)); color: #fff; border-color: rgba(138, 180, 255, 0.45); box-shadow: 0 6px 24px rgba(0, 199, 255, 0.18) inset; }
 
+.actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+#filename { display: none; }
+
 .actions button {
 	background: rgba(34, 40, 58, 0.7);
 	color: #e5e7eb;
@@ -228,7 +274,10 @@ body.theme-light .topbar {
 
 #editor { position: relative; min-height: 0; }
 
-.statusbar { display: flex; align-items: center; justify-content: space-between; height: 24px; padding: 0 10px; border-top: 1px solid rgba(255,255,255,0.06); background: rgba(15, 17, 21, 0.55); backdrop-filter: blur(8px); font-size: 12px; color: #9aa4b2; } 
+.statusbar { display: flex; align-items: center; justify-content: flex-start; gap: 8px; height: 24px; padding: 0 10px; border-top: 1px solid rgba(255,255,255,0.06); background: rgba(15, 17, 21, 0.55); backdrop-filter: blur(8px); font-size: 12px; color: #9aa4b2; } 
+/* Place language at far right, problems before it */
+#lang { margin-left: auto; order: 3; }
+.statusbar .problems-count { order: 2; margin-left: 8px; }
 
 .menubar { display: flex; gap: 12px; height: 32px; align-items: center; padding: 0 8px; border-bottom: 1px solid rgba(255,255,255,0.06); background: rgba(15, 17, 21, 0.55); backdrop-filter: blur(8px); position: relative; z-index: 5000; }
 .menu { position: relative; z-index: 5001; }
@@ -662,8 +711,7 @@ body.theme-light .file-tree .item.selected {
 }
 
 body.theme-light .tabs {
-	background: rgba(255, 255, 255, 0.95);
-	border-bottom-color: rgba(0, 0, 0, 0.08);
+	background: transparent;
 }
 
 body.theme-light .tab {
@@ -1110,3 +1158,44 @@ body.theme-light .editor-empty { color: #64748b; }
 
 /* Drop indicator for tab DnD */
 .tab-drop-indicator { width: 2px; background: #6366f1; border-radius: 2px; box-shadow: 0 0 0 2px rgba(99,102,241,0.15); margin: 2px 0; align-self: center; height: 24px; }
+
+/* Problems panel */
+.problems { display: grid; grid-auto-rows: min-content auto; border-top: 1px solid rgba(148,163,184,0.18); background: rgba(15,23,42,0.6); backdrop-filter: blur(6px); max-height: 40vh; }
+body.theme-light .problems { background: rgba(248,250,252,0.8); border-top-color: rgba(0,0,0,0.08); }
+.problems.hidden { display: none; }
+.problems-header { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: 6px 10px; font-size: 12px; color: #cbd5e1; }
+body.theme-light .problems-header { color: #0f172a; }
+.problems-header .actions button { background: transparent; border: 1px solid rgba(148,163,184,0.25); color: inherit; border-radius: 6px; padding: 2px 6px; cursor: pointer; }
+.problems-list { max-height: 36vh; overflow: auto; display: grid; }
+.problem-item { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; padding: 6px 10px; border-bottom: 1px dashed rgba(148,163,184,0.18); cursor: pointer; align-items: center; }
+.problem-item:hover { background: rgba(99,102,241,0.08); }
+.problem-item .kind { width: 14px; height: 14px; border-radius: 50%; }
+.problem-item.error .kind { background: #ef4444; }
+.problem-item.warning .kind { background: #f59e0b; }
+.problem-item.info .kind { background: #3b82f6; }
+.problem-item .loc { color: #94a3b8; font-size: 12px; }
+body.theme-light .problem-item:hover { background: rgba(59,130,246,0.10); }
+
+/* Status bar problems count */
+.statusbar .problems-count { margin-left: auto; color: #94a3b8; }
+.statusbar .problems-count.bad { color: #ef4444; }
+
+/* Force Monaco internal scrollbar visibility and sizing */
+#editor .monaco-editor,
+#editor2 .monaco-editor { overflow: hidden; }
+#editor .monaco-editor .scrollbar.vertical,
+#editor2 .monaco-editor .scrollbar.vertical { width: 12px !important; right: 0 !important; opacity: 1 !important; }
+#editor .monaco-editor .scrollbar.horizontal,
+#editor2 .monaco-editor .scrollbar.horizontal { height: 0 !important; opacity: 0 !important; pointer-events: none !important; }
+#editor .monaco-editor .scrollbar .slider,
+#editor2 .monaco-editor .scrollbar .slider { background: rgba(148,163,184,0.6) !important; border-radius: 8px !important; }
+#editor .monaco-editor .scrollbar .slider:hover,
+#editor2 .monaco-editor .scrollbar .slider:hover { background: rgba(148,163,184,0.75) !important; }
+#editor .monaco-editor .scrollbar .slider.active,
+#editor2 .monaco-editor .scrollbar .slider.active { background: rgba(203,213,225,0.85) !important; }
+
+/* Ensure Monaco fills container height so vertical scrollbar can render */
+#editor, #editor2 { height: 100%; min-height: 0; }
+#editor .monaco-editor, #editor2 .monaco-editor { height: 100% !important; }
+#editor .monaco-editor .overflow-guard, #editor2 .monaco-editor .overflow-guard { height: 100% !important; }
+#editor .monaco-scrollable-element, #editor2 .monaco-scrollable-element { height: 100% !important; }

@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('bridge', {
 		toggleFullScreen: () => ipcRenderer.invoke('window:toggleFullScreen'),
 		newWindow: () => ipcRenderer.invoke('window:new'),
 	},
+	lint: {
+		python: async ({ filePath, content }) => ipcRenderer.invoke('lint:python', { filePath, content }),
+	},
+	appReady: async () => ipcRenderer.invoke('app:renderer-ready'),
 	onFileOpened: (callback) => { fileOpenedListeners.add(callback); return () => fileOpenedListeners.delete(callback); },
 	onFileSaved: (callback) => { fileSavedListeners.add(callback); return () => fileSavedListeners.delete(callback); },
 	onFolderOpened: (callback) => { folderOpenedListeners.add(callback); return () => folderOpenedListeners.delete(callback); },

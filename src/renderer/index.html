@@ -137,6 +137,15 @@
 						<div id="editor2" class="hidden"></div>
 						<div id="editorEmpty" class="editor-empty hidden"><div><div class="title">Welcome to Barge Editor</div><div class="subtitle">Open a file or folder to get started</div></div></div>
 					</div>
+					<div id="problemsPanel" class="problems hidden" aria-label="Problems Panel" role="region">
+						<div class="problems-header">
+							<div class="title">Problems</div>
+							<div class="actions">
+								<button id="problemsToggle" title="Toggle Problems (Ctrl+Shift+M)">≡</button>
+							</div>
+						</div>
+						<div id="problemsList" class="problems-list" role="list"></div>
+					</div>
 					<div id="terminalPanel" class="terminal hidden">
 						<div class="terminal-header">
 							<div id="terminalTabs" class="terminal-tabs"></div>
@@ -147,6 +156,8 @@
 					<footer class="statusbar">
 						<span id="cursorPos">Ln 1, Col 1</span>
 						<span id="lang">plaintext</span>
+						<span id="problemsCount" class="problems-count" aria-live="polite"></span>
+						<button id="goTop" class="btn btn-small" title="Go to first line">Top</button>
 					</footer>
 				</main>
 			</div>

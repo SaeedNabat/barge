@@ -5,8 +5,14 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import pty from 'node-pty-prebuilt-multiarch';
+import { tmpdir } from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync = promisify(execFile);
 
 let mainWindow = null;
+let splashWindow = null;
+let showMainFallbackTimer = null;
 const terminals = new Map();
 let nextTermId = 1;
 
@@ -25,13 +31,75 @@ async function safeReadText(filePath) {
 	}
 }
 
+function fadeIn(win, durationMs = 220, target = 1) {
+	return new Promise((resolve) => {
+		if (!win || win.isDestroyed?.()) { resolve(); return; }
+		try { win.setOpacity(0); } catch {}
+		try { if (!win.isVisible?.()) win.show(); } catch {}
+		const start = Date.now();
+		const tick = () => {
+			const t = Math.min(1, (Date.now() - start) / Math.max(1, durationMs));
+			const eased = 1 - Math.pow(1 - t, 3);
+			try { win.setOpacity(0 + (target - 0) * eased); } catch {}
+			if (t < 1 && !win.isDestroyed?.()) setTimeout(tick, 16); else resolve();
+		};
+		tick();
+	});
+}
+
+function fadeOut(win, durationMs = 180, from = null) {
+	return new Promise((resolve) => {
+		if (!win || win.isDestroyed?.()) { resolve(); return; }
+		if (from != null) { try { win.setOpacity(from); } catch {} }
+		const start = Date.now();
+		const tick = () => {
+			const t = Math.min(1, (Date.now() - start) / Math.max(1, durationMs));
+			const eased = Math.pow(1 - t, 3);
+			try { win.setOpacity(eased); } catch {}
+			if (t < 1 && !win.isDestroyed?.()) setTimeout(tick, 16); else resolve();
+		};
+		tick();
+	});
+}
+
 async function createWindow() {
+	// Create splash window first
+	splashWindow = new BrowserWindow({
+		width: 380,
+		height: 200,
+		frame: false,
+		resizable: false,
+		transparent: false,
+		alwaysOnTop: false,
+		show: true,
+		backgroundColor: '#0f1115',
+		webPreferences: { sandbox: true }
+	});
+	try {
+		// Embed real logo bytes (fallback to file URL if embedding fails)
+		const logoPath = path.join(process.cwd(), 'src', 'assets', 'barge.png');
+		let logoSrc = pathToFileURL(logoPath).toString();
+		try {
+			const buf = await fs.readFile(logoPath);
+			logoSrc = `data:image/png;base64,${buf.toString('base64')}`;
+		} catch {}
+		const splashHtml = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset=\"utf-8\"><title>Loading…</title><style>html,body{margin:0;height:100%;background:#0f1115;color:#e5e7eb;font-family:system-ui,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',sans-serif} .wrap{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px} .logo{width:48px;height:48px;opacity:.98;image-rendering:auto} .spinner{width:28px;height:28px;border:3px solid #1f2937;border-top-color:#22c55e;border-right-color:#06b6d4;border-radius:50%;animation:spin .8s linear infinite;margin-top:6px}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class=\"wrap\"><img class=\"logo\" alt=\"Barge\" src=\"${logoSrc}\"/><div>Loading Barge…</div><div class=\"spinner\"></div></div></body></html>`)} `;
+		await splashWindow.loadURL(splashHtml);
+		try { splashWindow.setOpacity(0); } catch {}
+		await fadeIn(splashWindow, 220, 1);
+	} catch {}
+
+	// Prepare main window hidden
 	mainWindow = new BrowserWindow({
 		width: 1400,
 		height: 900,
+		minWidth: 1100,
+		minHeight: 720,
+		resizable: true,
 		frame: false,
 		titleBarStyle: 'hidden',
 		backgroundColor: '#0f1115',
+		show: false,
 		webPreferences: {
 			preload: path.join(process.cwd(), 'src', 'preload.cjs'),
 			contextIsolation: true,
@@ -39,8 +107,22 @@ async function createWindow() {
 			sandbox: false,
 		},
 	});
+	try { mainWindow.setMinimumSize(1100, 720); } catch {}
 
 	await mainWindow.loadFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'));
+
+	// Fallback: if renderer never signals readiness within 10s, show main anyway
+	clearTimeout(showMainFallbackTimer);
+	showMainFallbackTimer = setTimeout(async () => {
+		try {
+			try { mainWindow?.setOpacity?.(0); } catch {}
+			mainWindow?.show();
+			await fadeIn(mainWindow, 240, 1);
+		} catch {}
+		try { await fadeOut(splashWindow, 180); } catch {}
+		try { splashWindow?.close(); } catch {}
+		splashWindow = null;
+	}, 10000);
 
 	const template = [
 		{ role: 'viewMenu' },
@@ -57,6 +139,20 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
 	if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+
+// Renderer signals it's fully ready to be shown
+ipcMain.handle('app:renderer-ready', async () => {
+	try { clearTimeout(showMainFallbackTimer); } catch {}
+	try {
+		try { mainWindow?.setOpacity?.(0); } catch {}
+		mainWindow?.show();
+		await fadeIn(mainWindow, 240, 1);
+	} catch {}
+	try { await fadeOut(splashWindow, 180); } catch {}
+	try { splashWindow?.close(); } catch {}
+	splashWindow = null;
+	return { ok: true };
 });
 
 ipcMain.handle('window:minimize', () => { mainWindow?.minimize(); });
@@ -218,23 +314,112 @@ ipcMain.handle('search:inFolder', async (_evt, { root, query, caseSensitive = fa
 						} else {
 							const hay = caseSensitive ? lines[i] : lines[i].toLowerCase();
 							const needle = caseSensitive ? query : query.toLowerCase();
-							let pos = -1, offset = 0;
-							while ((pos = hay.indexOf(needle, offset)) !== -1 && results.length < maxResults) {
-								idxs.push({ start: pos, end: pos + needle.length });
-								offset = pos + needle.length;
+							let pos = 0; let idx;
+							while ((idx = hay.indexOf(needle, pos)) !== -1 && results.length < maxResults) {
+								idxs.push({ start: idx, end: idx + needle.length }); pos = idx + needle.length;
 							}
 						}
-						if (idxs.length) {
-							results.push({ filePath: full, line: i + 1, matches: idxs, preview: lines[i] });
-							if (results.length >= maxResults) return;
-						}
+						if (idxs.length) results.push({ file: full, line: i + 1, matches: idxs });
+						if (results.length >= maxResults) return;
 					}
 				} catch {}
 			}
 		}
 	}
 	await walk(root);
-	return results;
+	return { ok: true, results };
+});
+
+// Python linting IPC: tries pyright (JSON), then flake8/pyflakes (text)
+ipcMain.handle('lint:python', async (_evt, { filePath, content }) => {
+	const tmpBase = tmpdir();
+	let tmpPath = null;
+	const cwd = filePath ? path.dirname(filePath) : process.cwd();
+	try {
+		if (!filePath) {
+			tmpPath = path.join(tmpBase, `barge_lint_${Date.now()}.py`);
+			await fs.writeFile(tmpPath, content ?? '', 'utf8');
+		} else {
+			tmpPath = filePath;
+		}
+		// Try ruff JSON
+		try {
+			const { stdout } = await execFileAsync('ruff', ['check', '--output-format', 'json', tmpPath], { windowsHide: true, maxBuffer: 5 * 1024 * 1024, cwd });
+			const arr = JSON.parse(stdout || '[]');
+			const diags = arr.map(d => ({
+				message: d.message || '',
+				severity: (d.kind === 'error' || String(d.code || '').startsWith('E')) ? 'error' : 'warning',
+				line: (d.location?.row ?? 1), column: (d.location?.column ?? 1),
+				endLine: (d.end_location?.row ?? d.location?.row ?? 1), endColumn: (d.end_location?.column ?? (d.location?.column ?? 1) + 1),
+				code: d.code || ''
+			}));
+			return { ok: true, tool: 'ruff', diagnostics: diags };
+		} catch {}
+		// Try pyright JSON
+		try {
+			const { stdout } = await execFileAsync('pyright', ['--outputjson', tmpPath], { windowsHide: true, maxBuffer: 5 * 1024 * 1024, cwd });
+			const json = JSON.parse(stdout);
+			const diags = [];
+			for (const f of (json.diagnostics || [])) {
+				const d = f;
+				diags.push({
+					message: d.message || '',
+					severity: (d.severity === 'error') ? 'error' : (d.severity === 'warning' ? 'warning' : 'info'),
+					line: (d.range?.start?.line ?? d.range?.start?.lineNumber ?? d.range?.start ?? 0) + 1,
+					column: (d.range?.start?.character ?? d.range?.start?.column ?? 0) + 1,
+					endLine: (d.range?.end?.line ?? d.range?.end?.lineNumber ?? d.range?.end ?? 0) + 1,
+					endColumn: (d.range?.end?.character ?? d.range?.end?.column ?? 0) + 1,
+					code: d.rule || d.ruleId || d.code || ''
+				});
+			}
+			return { ok: true, tool: 'pyright', diagnostics: diags };
+		} catch {}
+		// Try flake8
+		try {
+			const { stdout } = await execFileAsync('flake8', ['--format=%(path)s:%(row)d:%(col)d: %(code)s %(text)s', tmpPath], { windowsHide: true, maxBuffer: 5 * 1024 * 1024, cwd });
+			const diags = (stdout || '').split('\n').filter(Boolean).map(line => {
+				const m = line.match(/^(.*):(\d+):(\d+):\s+([A-Z]\d+)\s+(.*)$/);
+				if (!m) return null;
+				return { message: m[5], severity: m[4].startsWith('E') ? 'error' : 'warning', line: Number(m[2]), column: Number(m[3]), endLine: Number(m[2]), endColumn: Number(m[3]) + 1, code: m[4] };
+			}).filter(Boolean);
+			return { ok: true, tool: 'flake8', diagnostics: diags };
+		} catch {}
+		// Try python -m flake8
+		try {
+			const { stdout } = await execFileAsync('python3', ['-m', 'flake8', '--format=%(path)s:%(row)d:%(col)d: %(code)s %(text)s', tmpPath], { windowsHide: true, maxBuffer: 5 * 1024 * 1024, cwd });
+			const diags = (stdout || '').split('\n').filter(Boolean).map(line => {
+				const m = line.match(/^(.*):(\d+):(\d+):\s+([A-Z]\d+)\s+(.*)$/);
+				if (!m) return null;
+				return { message: m[5], severity: m[4].startsWith('E') ? 'error' : 'warning', line: Number(m[2]), column: Number(m[3]), endLine: Number(m[2]), endColumn: Number(m[3]) + 1, code: m[4] };
+			}).filter(Boolean);
+			return { ok: true, tool: 'flake8', diagnostics: diags };
+		} catch {}
+		// Try pyflakes
+		try {
+			const { stdout } = await execFileAsync('pyflakes', [tmpPath], { windowsHide: true, maxBuffer: 5 * 1024 * 1024, cwd });
+			const diags = (stdout || '').split('\n').filter(Boolean).map(line => {
+				const m = line.match(/^(.*):(\d+):(\d+):\s*(.*)$/);
+				if (!m) return null;
+				return { message: m[4], severity: 'warning', line: Number(m[2]), column: Number(m[3]), endLine: Number(m[2]), endColumn: Number(m[3]) + 1, code: '' };
+			}).filter(Boolean);
+			return { ok: true, tool: 'pyflakes', diagnostics: diags };
+		} catch {}
+		// Try python -m pyflakes
+		try {
+			const { stdout } = await execFileAsync('python3', ['-m', 'pyflakes', tmpPath], { windowsHide: true, maxBuffer: 5 * 1024 * 1024, cwd });
+			const diags = (stdout || '').split('\n').filter(Boolean).map(line => {
+				const m = line.match(/^(.*):(\d+):(\d+):\s*(.*)$/);
+				if (!m) return null;
+				return { message: m[4], severity: 'warning', line: Number(m[2]), column: Number(m[3]), endLine: Number(m[2]), endColumn: Number(m[3]) + 1, code: '' };
+			}).filter(Boolean);
+			return { ok: true, tool: 'pyflakes', diagnostics: diags };
+		} catch {}
+		return { ok: true, tool: null, diagnostics: [] };
+	} catch (e) {
+		return { ok: false, error: String(e), diagnostics: [] };
+	} finally {
+		// optional temp cleanup could be added
+	}
 });
 
 ipcMain.handle('terminal:create', (_evt, cols, rows, cwd) => {

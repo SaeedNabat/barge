@@ -22,6 +22,17 @@ function safeBind(el, type, handler) { if (el && !(el.dataset && el.dataset.boun
 function hideAnyModal() { document.querySelectorAll('.modal').forEach(m => m.classList.add('hidden')); }
 function closeCmdPalette() { const el = document.getElementById('cmdPalette'); if (!el) return; el.classList.add('hidden'); document.getElementById('cmdInput')?.blur(); }
 
+// Escape HTML for safe insertion into innerHTML
+function escapeHtml(input) {
+	if (input == null) return '';
+	return String(input)
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#039;');
+}
+
 function openInTabSafe(filePath, content) {
 	if (typeof window.bargeOpenFileInTab === 'function') {
 		window.bargeOpenFileInTab(filePath, content);
@@ -227,6 +238,85 @@ function loadSettings() {
 
 function saveSettings() { localStorage.setItem('barge:settings', JSON.stringify(settings)); }
 
+// Session persistence
+let sessionSaveTimer = null;
+const sessionCursors = {}; // path -> { lineNumber, column }
+function serializeSession() {
+	return {
+		workspaceRoot: currentWorkspaceRoot || null,
+		openTabs: openTabs.map(t => ({ path: t.path, title: t.title })),
+		activeTabPath: activeTabPath || null,
+		split: { on: !!document.getElementById('editorSplit')?.classList.contains('split-on'), activePane },
+		cursors: sessionCursors,
+	};
+}
+function saveSession(immediate = false) {
+	if (immediate) {
+		try { localStorage.setItem('barge:session', JSON.stringify(serializeSession())); } catch {}
+		return;
+	}
+	clearTimeout(sessionSaveTimer);
+	sessionSaveTimer = setTimeout(() => {
+		try { localStorage.setItem('barge:session', JSON.stringify(serializeSession())); } catch {}
+	}, 150);
+}
+async function restoreSession() {
+	let raw = null; try { raw = localStorage.getItem('barge:session'); } catch {}
+	if (!raw) return;
+	let data = null; try { data = JSON.parse(raw); } catch { return; }
+	if (!data || typeof data !== 'object') return;
+	if (data.cursors && typeof data.cursors === 'object') { Object.assign(sessionCursors, data.cursors); }
+	// Restore workspace tree first
+	if (!currentWorkspaceRoot && data.workspaceRoot) {
+		try {
+			const payload = await window.bridge.readFolderTree(data.workspaceRoot);
+			if (payload?.ok) {
+				currentWorkspaceRoot = payload.root;
+				if (window.bargeRenderTree) window.bargeRenderTree(payload.root, payload.tree); else renderTree(payload.root, payload.tree, { expandedPaths: new Set(), selectedPath: null });
+					try { updateEmptyState(); } catch {}
+			}
+		} catch {}
+	}
+	// Restore tabs
+	if (Array.isArray(data.openTabs)) {
+		for (const t of data.openTabs) {
+			if (!t || !t.path) continue;
+			try {
+				const file = await window.bridge.readFileByPath(t.path);
+				if (file && typeof file.content === 'string') {
+					openInTabSafe(t.path, file.content);
+				}
+			} catch {}
+		}
+	}
+	// After tabs created, activate and restore cursor
+	await new Promise((resolve) => {
+	if (data.activeTabPath) {
+		setTimeout(() => {
+			try {
+					// Ensure the saved tab is activated (also updates status bar/lang)
+					activateTab(data.activeTabPath);
+				const pos = sessionCursors[data.activeTabPath];
+				if (pos && editor && modelsByPath.has(data.activeTabPath)) {
+					editor.revealPositionInCenter(pos);
+					editor.setPosition(pos);
+				}
+			} catch {}
+				resolve();
+			}, 60);
+		} else {
+			resolve();
+	}
+	});
+	// Restore split state
+	if (data.split && data.split.on) {
+		try { splitEditor(); } catch {}
+		if (data.split.activePane === 'right' && editor2Instance) { activePane = 'right'; }
+	}
+	// Notify others that session restore is done
+	try { window.dispatchEvent(new Event('barge:session-restored')); } catch {}
+}
+
 function applySettings() {
 	if (!editor || !monacoRef) return;
 	editor.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize });
@@ -257,7 +347,7 @@ function applySettings() {
 		
 		// Reflect state in View menu
 		updateViewMenuState?.();
-	}
+}
 
 function getTerminalThemeForCurrentSettings() {
 	const isLightTheme = settings.theme === 'light';
@@ -335,6 +425,11 @@ function updateEmptyState() {
 	if (fileTreeFilterWrap) {
 		if (currentWorkspaceRoot) {
 			fileTreeFilterWrap.style.display = 'block';
+					// Hide sidebar welcome open buttons when a folder is open
+					try {
+						const sw = document.getElementById('sidebarWelcome');
+						if (sw) sw.style.display = 'none';
+					} catch {}
 		} else {
 			fileTreeFilterWrap.style.display = 'none';
 			const inp = document.getElementById('fileTreeFilter');
@@ -360,6 +455,8 @@ function updateEditorEnabled() {
 
 // Early bootstrap to ensure clicks work even if Monaco hasn't finished loading
 window.addEventListener('DOMContentLoaded', () => {
+	// Swallow Monaco's expected cancellation rejections
+	try { window.addEventListener('unhandledrejection', (e) => { const r = e?.reason; const msg = (r && (r.message || r.name)) ? (r.message || r.name) : String(r); if (msg && msg.toLowerCase().includes('canceled')) { e.preventDefault?.(); } }); } catch {}
 	loadSettings();
 	loadRecents();
 
@@ -399,6 +496,8 @@ window.addEventListener('DOMContentLoaded', () => {
 		if (isOpeningFolder) return; isOpeningFolder = true;
 		try {
 			hideAnyModal();
+				// Show file tree loading overlay
+				try { document.getElementById('fileTree')?.classList?.add('loading'); } catch {}
 			const payload = await window.bridge?.openFolder?.();
 			if (payload && payload.root) {
 				addRecentFolder(payload.root);
@@ -411,7 +510,10 @@ window.addEventListener('DOMContentLoaded', () => {
 					window.dispatchEvent(new Event('barge:pending-folder'));
 				}
 			}
-		} finally { isOpeningFolder = false; }
+			} finally {
+				try { document.getElementById('fileTree')?.classList?.remove('loading'); } catch {}
+				isOpeningFolder = false;
+			}
 	}
 
 	document.addEventListener('click', async (e) => {
@@ -452,6 +554,7 @@ const mViewFullScreen = document.getElementById('mViewFullScreen');
 const mViewZenMode = document.getElementById('mViewZenMode');
 	const prefsModal = document.getElementById('prefsModal');
 	const mViewToggleStatus = document.getElementById('mViewToggleStatus');
+	const goTopBtn = document.getElementById('goTop');
 	const mViewToggleWordWrap = document.getElementById('mViewToggleWordWrap');
 	const mViewToggleLineNumbers = document.getElementById('mViewToggleLineNumbers');
 	const prefFontFamily = document.getElementById('prefFontFamily');
@@ -1457,7 +1560,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		}
 
 		function openFileInTab(filePath, content) {
-			console.log('openFileInTab called with:', filePath);
+							// open file in tab
 			const model = getOrCreateModel(filePath, content);
 			if (!model) {
 				console.error('Cannot create model - Monaco not ready');
@@ -1466,12 +1569,13 @@ document.addEventListener('DOMContentLoaded', () => {
 			
 			let tab = openTabs.find(t => t.path === filePath);
 			if (!tab) { 
-				console.log('Creating new tab for:', filePath);
+				// creating new tab
 				tab = { path: filePath, title: basename(filePath), dirty: false, modelUri: model.uri.toString() }; 
 				openTabs.push(tab); 
 				const tabEl = document.createElement('div'); 
 				tabEl.className = 'tab'; 
 				tabEl.setAttribute('draggable', 'true');
+				tabEl.dataset.path = filePath;
 				const titleEl = document.createElement('div'); 
 				titleEl.className = 'title'; 
 				titleEl.textContent = tab.title; 
@@ -1487,17 +1591,22 @@ document.addEventListener('DOMContentLoaded', () => {
 				tabEl.appendChild(titleEl); 
 				tabEl.appendChild(closeEl); 
 				tabEl.addEventListener('click', (e) => { 
-					console.log('Tab click event triggered for:', filePath);
-					console.log('Event target:', e.target);
-					console.log('Event currentTarget:', e.currentTarget);
-					console.log('Event bubbles:', e.bubbles);
+					// tab click
+					// debug removed
 					
 					e.preventDefault();
 					e.stopPropagation(); 
 					e.stopImmediatePropagation();
 					
-					console.log('Tab clicked:', filePath); // Debug log
+					// tab activated
 					activateTab(filePath); 
+				}); 
+				// Tab context menu
+				tabEl.addEventListener('contextmenu', (e) => {
+					e.preventDefault();
+					e.stopPropagation();
+					const p = (e.currentTarget instanceof Element) ? (e.currentTarget.dataset?.path || filePath) : filePath;
+					showTabContextMenu(e.pageX, e.pageY, p);
 				}); 
 				tab._el = tabEl; 
 				tab._titleEl = titleEl; 
@@ -1526,8 +1635,17 @@ document.addEventListener('DOMContentLoaded', () => {
 					editor.setModel(model);
 					editor.focus();
 				}
+				// Update active tab styling
+				try {
+					for (const t of openTabs) {
+						if (t && t._el) t._el.classList.toggle('active', t.path === path);
+					}
+				} catch {}
+				// Update filename and language in status bar
+				try { filenameEl.textContent = path; langEl.textContent = guessLanguage(path); } catch {}
 				updateStatus();
 				updateEditorEnabled();
+				saveSession();
 			} catch (e) { console.error('activateTab failed', e); }
 		}
 
@@ -1572,25 +1690,14 @@ document.addEventListener('DOMContentLoaded', () => {
 			if (activeTabPath === filePath) {
 				console.log('Closing active tab, switching to next tab or clearing editor');
 				if (openTabs.length > 0) {
-					const nextTab = openTabs[Math.min(tabIndex, openTabs.length - 1)];
-					console.log('Switching to next tab:', nextTab.path);
-					activateTab(nextTab.path);
+					const nextTab = openTabs[0];
+					if (nextTab) activateTab(nextTab.path);
 				} else {
-					console.log('No more tabs, clearing editor directly');
-					// Clear editor directly instead of calling clearEditor()
-					if (editor) {
-						console.log('Clearing editor directly');
-						editor.setValue('');
-						editor.updateOptions({ language: 'plaintext' });
-					}
 					activeTabPath = null;
-					filenameEl.textContent = '';
-					langEl.textContent = '';
-					updateStatus();
-					// Disable editor when no tabs remain
 					updateEditorEnabled();
 				}
 			}
+			saveSession();
 		}
 
 		// Move clearEditor inside the require callback where editor is accessible
@@ -1650,8 +1757,9 @@ document.addEventListener('DOMContentLoaded', () => {
 							tab.path = res.filePath;
 							tab.title = basename(res.filePath);
 							tab._titleEl.textContent = tab.title;
+							// Update dataset on DOM element for context menu/close operations
+							if (tab._el) tab._el.dataset.path = res.filePath;
 							activeTabPath = res.filePath;
-							
 							// Update the close button event handler to use the new path
 							const closeEl = tab._el.querySelector('.close');
 							if (closeEl) {
@@ -1659,7 +1767,6 @@ document.addEventListener('DOMContentLoaded', () => {
 								closeEl.replaceWith(closeEl.cloneNode(true));
 								const newCloseEl = tab._el.querySelector('.close');
 								newCloseEl.addEventListener('click', (e) => { 
-									console.log('Close button clicked for:', res.filePath);
 									e.stopPropagation(); 
 									closeTab(res.filePath); 
 									updateEmptyState(); 
@@ -1821,6 +1928,8 @@ document.addEventListener('DOMContentLoaded', () => {
 		window.bridge?.onFileOpened?.((payload) => { 
 			openFileInTab(payload.filePath, payload.content); 
 			updateEmptyState(); 
+			// Ensure opened file tab is active
+			try { activateTab(payload.filePath); } catch {}
 		});
 
 		// Make functions available globally
@@ -1940,7 +2049,10 @@ document.addEventListener('DOMContentLoaded', () => {
 						'editorSuggestWidget.border': '#e2e8f0',
 						'editorSuggestWidget.selectedBackground': '#dbeafe',
 						'editorHoverWidget.background': '#ffffff',
-						'editorHoverWidget.border': '#e2e8f0'
+						'editorHoverWidget.border': '#e2e8f0',
+						'scrollbarSlider.background': '#94a3b888',
+						'scrollbarSlider.hoverBackground': '#64748b88',
+						'scrollbarSlider.activeBackground': '#33415588'
 					}
 				});
 
@@ -1985,7 +2097,10 @@ document.addEventListener('DOMContentLoaded', () => {
 						'editorSuggestWidget.border': '#374151',
 						'editorSuggestWidget.selectedBackground': '#1e40af',
 						'editorHoverWidget.background': '#1f2937',
-						'editorHoverWidget.border': '#374151'
+						'editorHoverWidget.border': '#374151',
+						'scrollbarSlider.background': '#64748b88',
+						'scrollbarSlider.hoverBackground': '#94a3b888',
+						'scrollbarSlider.activeBackground': '#cbd5e188'
 					}
 				});
 
@@ -2008,11 +2123,20 @@ document.addEventListener('DOMContentLoaded', () => {
 				cursorSurroundingLinesStyle: "default",
 				smoothScrolling: true,
 				bracketPairColorization: { enabled: true },
-				matchBrackets: 'always'
+				matchBrackets: 'always',
+				scrollbar: { vertical: 'visible', horizontal: 'hidden', verticalScrollbarSize: 12, useShadows: false, alwaysConsumeMouseWheel: true }
 			});
 
 				// Set up editor event listeners
 				editor.onDidChangeCursorPosition(() => updateStatus());
+				editor.onDidChangeCursorPosition(() => {
+					try {
+						const path = activeTabPath;
+						if (!path) return;
+						const pos = editor.getPosition();
+						if (pos) { sessionCursors[path] = { lineNumber: pos.lineNumber, column: pos.column }; saveSession(); }
+					} catch {}
+				});
 				editor.onDidChangeModelContent(() => { 
 					markDirty(activeTabPath, true); 
 					// handleAutoSave(); 
@@ -2027,17 +2151,179 @@ document.addEventListener('DOMContentLoaded', () => {
 				// Ensure correct enabled/disabled state on startup
 				updateEditorEnabled();
 
+				// Robust relayout to keep scrollbars visible across resizes/maximize
+				try {
+					let relayoutPending = false;
+					let relayoutTimer = 0;
+					function doLayout() {
+						try {
+							const el = editorContainer;
+							if (!el) return;
+							const size = { width: Math.max(0, el.clientWidth), height: Math.max(0, el.clientHeight) };
+							if (editor) editor.layout(size);
+							if (editor2Instance) editor2Instance.layout(size);
+						} finally {
+							relayoutPending = false;
+						}
+					}
+					function scheduleRelayout() {
+						if (relayoutPending) { clearTimeout(relayoutTimer); relayoutTimer = setTimeout(() => requestAnimationFrame(doLayout), 100); return; }
+						relayoutPending = true;
+						relayoutTimer = setTimeout(() => requestAnimationFrame(doLayout), 100);
+					}
+ 
+ 					// Observe container size changes
+ 					const ro = new ResizeObserver(() => scheduleRelayout());
+ 					ro.observe(editorContainer);
+ 					// Window resize fallback
+ 					window.addEventListener('resize', scheduleRelayout);
+ 					// Initial post-init relayouts
+ 					scheduleRelayout();
+ 					setTimeout(scheduleRelayout, 120);
+ 				} catch {}
+
 				// Process any pending files now that Monaco is ready
+				const pendingOps = [];
 				if (window.__PENDING_OPEN__) {
 					const p = window.__PENDING_OPEN__;
-					// Get the actual file content
-					window.bridge.readFileByPath(p.filePath).then(file => {
-						if (file && file.content !== undefined) {
-							openFileInTab(p.filePath, file.content);
-						}
-					});
+					pendingOps.push((async () => {
+						try {
+							const file = await window.bridge.readFileByPath(p.filePath);
+							if (file && file.content !== undefined) openFileInTab(p.filePath, file.content);
+						} catch {}
+					})());
 					window.__PENDING_OPEN__ = null;
 				}
+				// Attempt session restore and wait for it
+				pendingOps.push((async () => { try { await restoreSession(); } catch {} })());
+
+				// After tabs/tree restored and layout stabilized, signal app ready
+				(async () => {
+					try {
+						await Promise.all(pendingOps);
+						await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+						window.bridge?.appReady?.();
+					} catch {}
+				})();
+
+				// Python linting: debounce and set markers in Monaco
+				try {
+					let lintTimer = null;
+					async function runPythonLint(model) {
+						if (!model || !monacoRef) { console.debug('lint:skip no model/monaco'); return; }
+						const uri = model.uri;
+						const path = uri?.path || uri?.fsPath || null;
+						const language = model.getLanguageId?.() || '';
+						if (language !== 'python') { console.debug('lint:skip non-python', { language, path }); return; }
+						const version = model.getVersionId?.();
+						const content = model.getValue();
+						console.debug('lint:start', { path, version, bytes: content?.length ?? 0 });
+						let res = null; try { res = await window.bridge?.lint?.python?.({ filePath: path, content }); } catch (e) { console.error('lint:ipc error', e); return; }
+						const currentModel = monacoRef.editor.getModel(uri);
+						if (!currentModel || currentModel.isDisposed?.()) { console.debug('lint:skip disposed', { path }); return; }
+						if (version != null && currentModel.getVersionId?.() !== version) { console.debug('lint:skip stale', { requested: version, current: currentModel.getVersionId?.() }); return; }
+						if (!res || !res.ok) { try { monacoRef.editor.setModelMarkers(currentModel, 'barge-python', []); } catch {} console.warn('lint:no result', res); return; }
+						console.debug('lint:result', { tool: res.tool, count: (res.diagnostics || []).length });
+						const markers = (res.diagnostics || []).map(d => ({
+							severity: d.severity === 'error' ? monacoRef.MarkerSeverity.Error : (d.severity === 'warning' ? monacoRef.MarkerSeverity.Warning : monacoRef.MarkerSeverity.Info),
+							message: d.message || '',
+							startLineNumber: d.line || d.startLine || 1,
+							startColumn: d.column || d.startColumn || 1,
+							endLineNumber: d.endLine || d.line || 1,
+							endColumn: d.endColumn || (d.column ? d.column + 1 : 2),
+							source: res.tool || 'python'
+						}));
+						try { monacoRef.editor.setModelMarkers(currentModel, 'barge-python', markers); console.debug('lint:set markers', { count: markers.length }); } catch (e) { console.error('lint:set markers failed', e); }
+					}
+					function scheduleLint() {
+						clearTimeout(lintTimer);
+						lintTimer = setTimeout(() => {
+							try { const m = editor.getModel?.(); runPythonLint(m); } catch (e) { console.error('lint:schedule failed', e); }
+						}, 300);
+					}
+					// expose for tab events
+					window.__schedulePythonLint = scheduleLint;
+					editor.onDidChangeModelContent(() => scheduleLint());
+					editor.onDidChangeModel(() => scheduleLint());
+					editor.onDidChangeModelLanguage?.(() => scheduleLint());
+					editor.onDidFocusEditorText?.(() => scheduleLint());
+					setTimeout(() => scheduleLint(), 200);
+				} catch {}
+
+				// Problems panel wiring
+				try {
+					const problemsPanel = document.getElementById('problemsPanel');
+					const problemsList = document.getElementById('problemsList');
+					const problemsCount = document.getElementById('problemsCount');
+					const problemsToggle = document.getElementById('problemsToggle');
+					function renderProblems(markersByUri) {
+						if (!problemsList || !problemsCount) return;
+						problemsList.innerHTML = '';
+						let total = 0; let totalErrors = 0;
+						for (const [uri, markers] of markersByUri) {
+							for (const m of markers) {
+								total++;
+								if (m.severity === monacoRef.MarkerSeverity.Error) totalErrors++;
+								const row = document.createElement('div');
+								const kind = m.severity === monacoRef.MarkerSeverity.Error ? 'error' : (m.severity === monacoRef.MarkerSeverity.Warning ? 'warning' : 'info');
+								row.className = `problem-item ${kind}`;
+								row.innerHTML = `<div class="kind"></div><div class="msg">${escapeHtml(m.message || '')}</div><div class="loc">${basename(uri.path)}:${m.startLineNumber}:${m.startColumn}</div>`;
+								row.addEventListener('click', () => {
+									try {
+										const model = monacoRef.editor.getModel(uri);
+										if (model) {
+											if (activePane === 'right' && editor2Instance) editor2Instance.setModel(model); else editor.setModel(model);
+											const pos = { lineNumber: m.startLineNumber, column: m.startColumn };
+											editor.revealPositionInCenter(pos);
+											editor.setPosition(pos);
+										}
+									} catch {}
+								});
+								problemsList.appendChild(row);
+							}
+						}
+						problemsCount.textContent = total ? `${totalErrors ? '' : ''}${total} problems` : '';
+						problemsCount.classList.toggle('bad', totalErrors > 0);
+					}
+					function collectMarkersByUri() {
+						const all = monacoRef.editor.getModels();
+						const map = new Map();
+						for (const model of all) {
+							const arr = monacoRef.editor.getModelMarkers({ resource: model.uri });
+							if (arr && arr.length) map.set(model.uri, arr);
+						}
+						return map;
+					}
+					function updateProblems() { try { renderProblems(collectMarkersByUri()); } catch {} }
+					monacoRef.editor.onDidChangeMarkers(() => updateProblems());
+					problemsToggle?.addEventListener('click', (e) => { e.preventDefault(); problemsPanel?.classList.toggle('hidden'); });
+					// Initial
+					updateProblems();
+				} catch {}
+
+					// Go to first line button
+					safeBind(goTopBtn, 'click', () => {
+						try {
+							const m = editor?.getModel?.();
+							if (!m) return;
+							editor.revealLineInCenter(1);
+							editor.setPosition({ lineNumber: 1, column: 1 });
+							editor.focus();
+						} catch {}
+					});
+				// Format and Problems toggles
+									document.addEventListener('keydown', (e) => {
+						if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'f') {
+							e.preventDefault();
+							try { const act = editor.getAction('editor.action.formatDocument'); if (act) act.run()?.catch?.(() => {}); } catch {}
+						}
+						if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'm') {
+							e.preventDefault();
+							const panel = document.getElementById('problemsPanel');
+							panel?.classList.toggle('hidden');
+						}
+					}, true);
+
 			});
 		}
 
@@ -2271,11 +2557,12 @@ document.addEventListener('DOMContentLoaded', () => {
 				automaticLayout: true,
 				theme: settings.theme === 'light' ? 'barge-light' : 'barge-dark'
 			}));
-			editor2Instance.onDidFocusEditorText?.(() => { activePane = 'right'; });
+			editor2Instance.onDidFocusEditorText?.(() => { activePane = 'right'; saveSession(); });
 			// Mirror current model
 			const current = editor.getModel?.();
 			if (current) editor2Instance.setModel(current);
 		}
+		saveSession();
 	}
 	function unsplitEditor() {
 		if (!editorSplit || !editor2) return;
@@ -2283,6 +2570,7 @@ document.addEventListener('DOMContentLoaded', () => {
 		editor2.classList.add('hidden');
 		if (editor2Instance) { try { editor2Instance.dispose(); } catch {} editor2Instance = null; }
 		activePane = 'left';
+		saveSession();
 	}
 	safeBind(mViewSplit, 'click', splitEditor);
 	safeBind(mViewUnsplit, 'click', unsplitEditor);
@@ -2373,5 +2661,85 @@ function attachTabDnD() {
 		}).filter(Boolean);
 		const map = new Map(openTabs.map(t => [t.path, t]));
 		openTabs = newOrder.map(p => map.get(p)).filter(Boolean);
+		saveSession();
 	});
+}
+
+window.addEventListener('beforeunload', () => { try { saveSession(true); } catch {} });
+
+// Context menu for tabs
+function showTabContextMenu(x, y, tabPath) {
+	let menuEl = null;
+	function destroyMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+	const items = [];
+	items.push(
+		{ label: 'Close', action: () => { try { if (window.__forceClosePath) window.__forceClosePath(tabPath); else domClosePath(tabPath); } catch {} } },
+		{ label: 'Close Others', action: () => { try { const toClose = Array.from(document.querySelectorAll('.tabs .tab')).map(el => el?.dataset?.path).filter(Boolean).filter(p => p !== tabPath); for (const p of toClose) { if (window.__forceClosePath) window.__forceClosePath(p); else domClosePath(p); } } catch {} } },
+		{ label: 'Close All', action: () => { try { window.__closeAllTabs?.(); } catch {} } },
+		{ label: 'Save', action: async () => { try { window.__activateTab?.(tabPath); await window.__saveActive?.(); } catch {} } },
+		{ label: 'Reveal in OS', action: () => { try { window.bridge?.revealInOS?.(tabPath); } catch {} } },
+		{ label: 'Copy Path', action: () => { try { navigator.clipboard?.writeText(tabPath); } catch {} } }
+	);
+	// Build and show
+	destroyMenu();
+	menuEl = document.createElement('div');
+	menuEl.className = 'context-menu';
+	for (const it of items) {
+		const btn = document.createElement('button');
+		btn.className = 'context-item';
+		btn.textContent = it.label;
+		btn.addEventListener('pointerdown', (ev) => { ev.preventDefault(); ev.stopPropagation(); it.action?.(); destroyMenu(); }, true);
+		menuEl.appendChild(btn);
+	}
+	menuEl.style.left = `${x}px`;
+	menuEl.style.top = `${y}px`;
+	document.body.appendChild(menuEl);
+	requestAnimationFrame(() => menuEl.classList.add('show'));
+	setTimeout(() => {
+		const offDown = (e) => { if (!menuEl?.contains(e.target)) { destroyMenu(); document.removeEventListener('pointerdown', offDown, true); } };
+		document.addEventListener('pointerdown', offDown, true);
+	}, 0);
+}
+
+// Resilient closer for tab path (used by context menus)
+function forceClosePath(targetPath) {
+	try {
+		if (typeof closeTab === 'function') { closeTab(targetPath); return; }
+		if (typeof window.__closeTab === 'function') { window.__closeTab(targetPath); return; }
+	} catch {}
+	// Manual fallback if above are unavailable
+	try {
+		const idx = openTabs.findIndex(t => t.path === targetPath);
+		if (idx === -1) return;
+		const tab = openTabs[idx];
+		// Remove DOM
+		try { tab._el?.remove?.(); } catch {}
+		openTabs.splice(idx, 1);
+		// Dispose model
+		const model = modelsByPath.get(targetPath);
+		if (model) { try { model.dispose?.(); } catch {} modelsByPath.delete(targetPath); }
+		// Activate another tab if needed
+		if (activeTabPath === targetPath) {
+			if (openTabs.length > 0) {
+				const next = openTabs[0];
+				try { activateTab(next.path); } catch {}
+			} else {
+				activeTabPath = null;
+				updateEditorEnabled();
+			}
+		}
+		updateEmptyState();
+		saveSession();
+	} catch {}
+}
+// Expose fallback as well
+window.__forceClosePath = forceClosePath;
+
+function domClosePath(targetPath) {
+	try {
+		const tabEl = document.querySelector(`.tabs .tab[data-path="${CSS.escape(targetPath)}"]`);
+		const btn = tabEl?.querySelector('.close');
+		if (btn) { (btn).dispatchEvent(new MouseEvent('click', { bubbles: true })); return; }
+	} catch {}
+	try { window.__forceClosePath?.(targetPath); } catch {}
 }
