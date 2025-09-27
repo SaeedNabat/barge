@@ -3,17 +3,92 @@ if (!window.__MONACO_CONFIGURED__) {
 	window.__MONACO_CONFIGURED__ = true;
 	if (window.require && window.require.config) {
 		const monacoBase = new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString();
-		require.config({ paths: { vs: monacoBase + 'vs' } });
+		require.config({ 
+			paths: { vs: monacoBase + 'vs' },
+			// Optimize worker loading - only load necessary workers
+			'vs/editor/editor.worker': monacoBase + 'vs/editor/editor.worker.js',
+			'vs/language/json/json.worker': monacoBase + 'vs/language/json/json.worker.js',
+			'vs/language/css/css.worker': monacoBase + 'vs/language/css/css.worker.js',
+			'vs/language/html/html.worker': monacoBase + 'vs/language/html/html.worker.js',
+			'vs/language/typescript/ts.worker': monacoBase + 'vs/language/typescript/ts.worker.js'
+		});
 	}
-	// Fix worker loading under file:// with CSP via blob and correct baseUrl
+	
+	// Optimized worker environment - only create workers when needed
 	window.MonacoEnvironment = {
 		baseUrl: new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString(),
-		getWorkerUrl: function (_moduleId, _label) {
+		getWorkerUrl: function (moduleId, label) {
+			// Only load workers for languages that are actually used
+			const usedWorkers = {
+				'editorWorkerService': 'vs/editor/editor.worker.js',
+				'json': 'vs/language/json/json.worker.js',
+				'css': 'vs/language/css/css.worker.js',
+				'html': 'vs/language/html/html.worker.js',
+				'typescript': 'vs/language/typescript/ts.worker.js',
+				'javascript': 'vs/language/typescript/ts.worker.js' // JS uses TS worker
+			};
+			
+			const workerPath = usedWorkers[label] || usedWorkers[moduleId];
+			if (!workerPath) {
+				console.warn('Monaco: Worker not found for', moduleId, label);
+				return null; // Don't create unnecessary workers
+			}
+			
 			const abs = new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString();
-			const code = `self.MonacoEnvironment = { baseUrl: '${abs}' }; importScripts('${abs}vs/base/worker/workerMain.js');`;
+			const code = `self.MonacoEnvironment = { baseUrl: '${abs}' }; importScripts('${abs}${workerPath}');`;
 			const blob = new Blob([code], { type: 'text/javascript' });
 			return URL.createObjectURL(blob);
 		}
+	};
+	
+	// Language pack optimization - only register languages that are used
+	window.__MONACO_LANGUAGES_LOADED__ = new Set();
+	window.__loadMonacoLanguage = function(languageId) {
+		if (window.__MONACO_LANGUAGES_LOADED__.has(languageId)) {
+			return Promise.resolve();
+		}
+		
+		return new Promise((resolve, reject) => {
+			const languageMap = {
+				'javascript': 'vs/language/typescript/typescript',
+				'typescript': 'vs/language/typescript/typescript',
+				'json': 'vs/language/json/json',
+				'html': 'vs/language/html/html',
+				'css': 'vs/language/css/css',
+				'python': 'vs/language/python/python',
+				'java': 'vs/language/java/java',
+				'csharp': 'vs/language/csharp/csharp',
+				'cpp': 'vs/language/cpp/cpp',
+				'c': 'vs/language/cpp/cpp',
+				'go': 'vs/language/go/go',
+				'rust': 'vs/language/rust/rust',
+				'php': 'vs/language/php/php',
+				'ruby': 'vs/language/ruby/ruby',
+				'swift': 'vs/language/swift/swift',
+				'kotlin': 'vs/language/kotlin/kotlin',
+				'scala': 'vs/language/scala/scala',
+				'xml': 'vs/language/xml/xml',
+				'yaml': 'vs/language/yaml/yaml',
+				'markdown': 'vs/language/markdown/markdown',
+				'sql': 'vs/language/sql/sql',
+				'shell': 'vs/language/shell/shell',
+				'powershell': 'vs/language/powershell/powershell',
+				'dockerfile': 'vs/language/dockerfile/dockerfile'
+			};
+			
+			const modulePath = languageMap[languageId];
+			if (!modulePath) {
+				console.warn('Monaco: Language not supported:', languageId);
+				resolve();
+				return;
+			}
+			
+			require([modulePath], function() {
+				window.__MONACO_LANGUAGES_LOADED__.add(languageId);
+				console.log('Monaco: Loaded language pack for', languageId);
+				resolve();
+			}, reject);
+		});
 	};
 }
 
@@ -1552,6 +1627,12 @@ document.addEventListener('DOMContentLoaded', () => {
 			if (!model) { 
 				const uri = monacoRef.Uri.file(filePath); 
 				const language = guessLanguage(filePath);
+				// Load language pack if not already loaded
+				if (window.__loadMonacoLanguage && language !== 'plaintext') {
+					window.__loadMonacoLanguage(language).catch(err => {
+						console.warn('Failed to load language pack for', language, err);
+					});
+				}
 				model = monacoRef.editor.createModel(content ?? '', language, uri); 
 				modelsByPath.set(filePath, model); 
 			} else if (typeof content === 'string' && model.getValue() !== content) { 
