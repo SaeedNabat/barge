@@ -33,29 +33,14 @@ if (!window.__MONACO_CONFIGURED__) {
 	// Optimized worker environment - only create workers when needed
 	window.MonacoEnvironment = {
 		baseUrl: monacoBaseUrl,
-		getWorkerUrl: function (moduleId, label) {
-			// Only load workers for languages that are actually used
-			const usedWorkers = {
-				'editorWorkerService': 'vs/editor/editor.worker.js',
-				'json': 'vs/language/json/json.worker.js',
-				'css': 'vs/language/css/css.worker.js',
-				'html': 'vs/language/html/html.worker.js',
-				'typescript': 'vs/language/typescript/ts.worker.js',
-				'javascript': 'vs/language/typescript/ts.worker.js' // JS uses TS worker
-			};
-			
-			const workerPath = usedWorkers[label] || usedWorkers[moduleId];
-			if (!workerPath) {
-				console.warn('Monaco: Worker not found for', moduleId, label);
-				return null; // Don't create unnecessary workers
-			}
-			
+		getWorkerUrl: function (_moduleId, _label) {
+			// Use generic bootstrap that lets Monaco resolve specific workers internally.
 			const abs = monacoBaseUrl;
-			const code = `self.MonacoEnvironment = { baseUrl: '${abs}' }; importScripts('${abs}${workerPath}');`;
+			const code = `self.MonacoEnvironment = { baseUrl: '${abs}' };\nimportScripts('${abs}vs/base/worker/workerMain.js');`;
 			const blob = new Blob([code], { type: 'text/javascript' });
 			return URL.createObjectURL(blob);
 		}
-	};
+ 	};
 	
 	// Language pack optimization - only register languages that are used
 	window.__MONACO_LANGUAGES_LOADED__ = new Set();
@@ -63,50 +48,42 @@ if (!window.__MONACO_CONFIGURED__) {
 		if (window.__MONACO_LANGUAGES_LOADED__.has(languageId)) {
 			return Promise.resolve();
 		}
-		
-		return new Promise((resolve, reject) => {
-			const languageMap = {
-				'javascript': 'vs/language/typescript/typescript',
-				'typescript': 'vs/language/typescript/typescript',
-				'json': 'vs/language/json/json',
-				'html': 'vs/language/html/html',
-				'css': 'vs/language/css/css',
-				'python': 'vs/language/python/python',
-				'java': 'vs/language/java/java',
-				'csharp': 'vs/language/csharp/csharp',
-				'cpp': 'vs/language/cpp/cpp',
-				'c': 'vs/language/cpp/cpp',
-				'go': 'vs/language/go/go',
-				'rust': 'vs/language/rust/rust',
-				'php': 'vs/language/php/php',
-				'ruby': 'vs/language/ruby/ruby',
-				'swift': 'vs/language/swift/swift',
-				'kotlin': 'vs/language/kotlin/kotlin',
-				'scala': 'vs/language/scala/scala',
-				'xml': 'vs/language/xml/xml',
-				'yaml': 'vs/language/yaml/yaml',
-				'markdown': 'vs/language/markdown/markdown',
-				'sql': 'vs/language/sql/sql',
-				'shell': 'vs/language/shell/shell',
-				'powershell': 'vs/language/powershell/powershell',
-				'dockerfile': 'vs/language/dockerfile/dockerfile'
-			};
-			
-			const modulePath = languageMap[languageId];
-			if (!modulePath) {
-				console.warn('Monaco: Language not supported:', languageId);
-				resolve();
-				return;
-			}
-			
-			require([modulePath], function() {
-				window.__MONACO_LANGUAGES_LOADED__.add(languageId);
-				console.log('Monaco: Loaded language pack for', languageId);
-				resolve();
-			}, reject);
+		// Map app languages to Monaco basic-languages entries
+		const basicMap = {
+			'javascript': 'javascript', 'typescript': 'typescript',
+			'json': 'json',
+			'html': 'html', 'xml': 'xml',
+			'css': 'css', 'scss': 'scss', 'less': 'less',
+			'python': 'python', 'markdown': 'markdown',
+			'shell': 'shell', 'sql': 'sql', 'yaml': 'yaml',
+			'cpp': 'cpp', 'c': 'cpp'
+		};
+		const entry = basicMap[languageId];
+		if (!entry) {
+			// Fallback: mark as loaded to avoid repeated attempts
+			console.warn('Monaco: No basic language module for', languageId);
+			window.__MONACO_LANGUAGES_LOADED__.add(languageId);
+			return Promise.resolve();
+		}
+		return new Promise((resolve) => {
+			try {
+				require([`vs/basic-languages/${entry}/${entry}`], function() {
+					window.__MONACO_LANGUAGES_LOADED__.add(languageId);
+					console.log('Monaco: Loaded basic language for', languageId);
+					resolve();
+				}, function() { resolve(); });
+			} catch { resolve(); }
 		});
 	};
 }
+
+// Ensure multi-terminal state is globally available
+let terminals = window.terminals instanceof Map ? window.terminals : new Map(); // id -> { instance, viewEl, tabEl }
+window.terminals = terminals;
+let terminalOrder = Array.isArray(window.terminalOrder) ? window.terminalOrder : [];
+window.terminalOrder = terminalOrder;
+// termId is already declared above; ensure it's on window for other scopes
+window.termId = typeof window.termId !== 'undefined' ? window.termId : null;
 
 // Robust top-level helpers
 function safeBind(el, type, handler) { if (el && !(el.dataset && el.dataset.bound === '1')) { el.addEventListener(type, handler); if (el.dataset) el.dataset.bound = '1'; } }
@@ -138,7 +115,7 @@ let editor2Instance = null; let activePane = 'left';
 const modelsByPath = new Map(); const autosaveTimers = new Map();
 let closedStack = [];
 let currentWorkspaceRoot = null; let isOpeningFile = false; let isOpeningFolder = false;
-let untitledCounter = 1; let termInstance = null; let termId = null; let selectedDirectoryPath = null; let refreshTimer = null;
+let untitledCounter = 1; let termInstance = null; let selectedDirectoryPath = null; let refreshTimer = null;
 
 function isUntitledPath(p) {
 	if (!p) return true;
@@ -979,6 +956,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 			terminalTabs.appendChild(tab);
 		}
 	}
+	window.renderTerminalTabs = renderTerminalTabs;
 
 	function switchTerminal(id) {
 		const rec = terminals.get(id);
@@ -994,11 +972,11 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		termInstance = rec.instance;
 		// Focus and resize after view becomes visible
 				setTimeout(() => {
-			applyTerminalResizeFor(id);
+			window.applyTerminalResizeFor?.(id);
 			rec.instance.focus();
 		}, 50);
 	}
-
+	window.switchTerminal = switchTerminal;
 	function applyTerminalResizeFor(id) {
 		const rec = terminals.get(id);
 		if (!rec) return;
@@ -1015,7 +993,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 			console.error('Resize failed:', err);
 		}
 	}
-
+	window.applyTerminalResizeFor = applyTerminalResizeFor;
 	function attachGlobalTerminalOnData() {
 		if (terminalOnDataBound) return;
 		terminalOnDataBound = true;
@@ -1023,9 +1001,12 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 			const rec = terminals.get(p.id);
 			if (rec && rec.instance) {
 				rec.instance.write(p.data);
+			} else {
+				console.log('No terminal record found for id:', p.id);
 			}
 		});
 	}
+	window.attachGlobalTerminalOnData = attachGlobalTerminalOnData;
 
 	async function createTerminal() {
 		// Ensure xterm
@@ -1035,8 +1016,11 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 			alert('Terminal library failed to load.');
 			return;
 		}
-		attachGlobalTerminalOnData();
-
+		window.attachGlobalTerminalOnData?.();
+		console.log('=== TERMINAL CREATION DEBUG ===');
+		console.log('window.bridge available:', !!window.bridge);
+		console.log('window.bridge.terminal available:', !!(window.bridge && window.bridge.terminal));
+		console.log('window.bridge.terminal.create available:', !!(window.bridge && window.bridge.terminal && window.bridge.terminal.create));
 		// Create view container
 		const view = document.createElement('div');
 		view.className = 'terminal-view';
@@ -1064,7 +1048,10 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		}
 
 		// Create backend pty
+// Create backend pty
+		console.log('Creating backend pty with cwd:', currentWorkspaceRoot || 'undefined');
 		const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || undefined);
+		console.log('Backend pty creation result:', created);
 		if (!created?.id) {
 			console.error('✗ Terminal create failed:', created);
 			instance.dispose?.();
@@ -1076,19 +1063,23 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		// Wire input -> backend
 		instance.onData((data) => {
 			if (window.bridge.terminal.write) window.bridge.terminal.write(id, data);
+			console.log('Terminal input data:', data);
+
 		});
 
 		// Track
 		terminals.set(id, { instance, viewEl: view, tabEl: null });
+		console.log('✓ Terminal stored in map with id:', id);
+		console.log('terminals.size:', terminals.size);
 		terminalOrder.push(id);
-		renderTerminalTabs();
-
+		window.renderTerminalTabs?.();
 		// Observe resize on this view
 		const ro = new ResizeObserver(() => setTimeout(() => applyTerminalResizeFor(id), 100));
 		ro.observe(xtermHost);
 
 		// Activate this terminal
 		switchTerminal(id);
+		console.log('Sending initial commands to terminal:', id);
 
 		// Initial prompt
 		setTimeout(() => {
@@ -1103,6 +1094,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 
 		return id;
 	}
+	window.createTerminal = createTerminal;
 
 	async function closeTerminal(id) {
 		const rec = terminals.get(id);
@@ -1112,7 +1104,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		rec.viewEl.remove();
 		terminals.delete(id);
 		terminalOrder = terminalOrder.filter(x => x !== id);
-		renderTerminalTabs();
+		window.renderTerminalTabs?.();
 		if (termId === id) {
 			const next = terminalOrder[terminalOrder.length - 1];
 			if (next) switchTerminal(next);
@@ -1126,7 +1118,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 	// New terminal button
 	safeBind(terminalNew, 'click', async () => {
 		terminalPanel?.classList.remove('hidden');
-		await createTerminal();
+		await window.createTerminal?.();
 	});
 
 	// Improved terminal loading using AMD loader
@@ -1148,7 +1140,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 			if (window.require && window.require.config) {
 				require.config({
 					paths: {
-						'xterm': '../../node_modules/xterm/lib/xterm'
+						'xterm': '/xterm/lib/xterm'
 				}
 			});
 		}
@@ -1201,7 +1193,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		terminalPanel?.classList.toggle('hidden');
 		if (!terminalPanel?.classList.contains('hidden')) {
 			if (!terminalOrder.length) {
-				await createTerminal();
+				await window.createTerminal?.();
 					} else {
 				const active = terminals.get(termId);
 				active?.instance?.focus?.();
@@ -1317,6 +1309,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 				});
 				
 				termInstance.onData((data) => {
+					console.log('Terminal input data:', data);
 					if (termId && window.bridge.terminal.write) {
 						window.bridge.terminal.write(termId, data);
 					}
@@ -2929,83 +2922,7 @@ async function ensureXtermCssLoaded() {
 	}
 }
 
-async function createTerminal() {
-	// Ensure xterm
-	const xtermLoaded = await ensureXtermLoadedWithFallback();
-	const cssOk = await ensureXtermCssLoaded();
-	if (!xtermLoaded) {
-		console.error('✗ xterm failed to load completely');
-		alert('Terminal library failed to load.');
-		return;
-	}
-	attachGlobalTerminalOnData();
 
-	// Create view container
-	const view = document.createElement('div');
-	view.className = 'terminal-view';
-	const xtermHost = document.createElement('div');
-	xtermHost.className = 'xterm';
-	view.appendChild(xtermHost);
-	terminalViews?.appendChild(view);
-
-	// Create terminal instance
-	let instance;
-	try {
-		instance = new window.Terminal({
-			convertEol: true,
-			cursorBlink: true,
-			fontSize: 14,
-			fontFamily: 'JetBrains Mono, Fira Code, Menlo, Consolas, monospace',
-			scrollback: 1000,
-			theme: getTerminalThemeForCurrentSettings()
-		});
-		instance.open(xtermHost);
-	} catch (error) {
-		console.error('✗ Failed to create terminal instance:', error);
-		view.remove();
-		return;
-	}
-
-	// Create backend pty
-	const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || undefined);
-	if (!created?.id) {
-		console.error('✗ Terminal create failed:', created);
-		instance.dispose?.();
-		view.remove();
-		return;
-	}
-	const id = created.id;
-
-	// Wire input -> backend
-	instance.onData((data) => {
-		if (window.bridge.terminal.write) window.bridge.terminal.write(id, data);
-	});
-
-	// Track
-	terminals.set(id, { instance, viewEl: view, tabEl: null });
-	terminalOrder.push(id);
-	renderTerminalTabs();
-
-	// Observe resize on this view
-	const ro = new ResizeObserver(() => setTimeout(() => applyTerminalResizeFor(id), 100));
-	ro.observe(xtermHost);
-
-	// Activate this terminal
-	switchTerminal(id);
-
-	// Initial prompt
-	setTimeout(() => {
-		applyTerminalResizeFor(id);
-		if (window.bridge.terminal.write) {
-			window.bridge.terminal.write(id, 'clear\r');
-			setTimeout(() => {
-				window.bridge.terminal.write(id, 'echo "Terminal ready!"\r');
-			}, 80);
-		}
-	}, 120);
-
-	return id;
-}
 
 async function ensureXtermLoaded() {
 	console.log('=== XTERM LOADING START ===');
@@ -3025,7 +2942,7 @@ async function ensureXtermLoaded() {
 		if (window.require && window.require.config) {
 			require.config({
 				paths: {
-					'xterm': '../../node_modules/xterm/lib/xterm'
+					'xterm': '/xterm/lib/xterm'
 			}
 		});
 	}
@@ -3078,7 +2995,7 @@ async function ensureXtermLoaded() {
 		terminalPanel?.classList.toggle('hidden');
 		if (!terminalPanel?.classList.contains('hidden')) {
 			if (!terminalOrder.length) {
-				await createTerminal();
+				await window.createTerminal?.();
 					} else {
 				const active = terminals.get(termId);
 				active?.instance?.focus?.();
