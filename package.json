@@ -5,14 +5,25 @@
   "main": "src/main.js",
   "type": "module",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "start:no-gpu": "cross-env BARGE_DISABLE_GPU=1 electron .",
+    "start:dist": "cross-env NODE_ENV=production electron .",
+    "start:dist:no-gpu": "cross-env NODE_ENV=production BARGE_DISABLE_GPU=1 electron .",
+    "build": "cross-env NODE_ENV=production node esbuild.config.js",
+    "dev:prepare": "mkdir -p src/renderer/public/monaco-editor && mkdir -p src/renderer/public && cp -r node_modules/monaco-editor/min src/renderer/public/monaco-editor/ && cp -r node_modules/xterm src/renderer/public/xterm",
+    "predev": "npm run dev:prepare",
+    "dev": "vite --port 5173",
+    "dev:electron": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "dev:all": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm:dev\" \"npm:dev:electron\"",
+    "dev:electron:no-gpu": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 BARGE_DISABLE_GPU=1 electron .",
+    "dev:all:no-gpu": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm:dev\" \"npm:dev:electron:no-gpu\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@electron/rebuild": "^4.0.1",
-    "concurrently": "^9.0.1",
+    "concurrently": "^9.2.1",
     "cross-env": "^10.0.0",
     "electron": "^33.2.0",
     "electron-rebuild": "^3.2.9",
@@ -21,6 +32,7 @@
   "dependencies": {
     "monaco-editor": "^0.52.0",
     "node-pty-prebuilt-multiarch": "^0.10.1-pre.5",
+    "vite": "^7.1.7",
     "xterm": "^5.3.0"
   }
 }

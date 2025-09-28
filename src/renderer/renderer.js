@@ -1,22 +1,38 @@
 // Ensure Monaco AMD config only runs once
+function waitForAmdLoader() {
+	return new Promise((resolve) => {
+	  if (window.require && window.require.config) { resolve(); return; }
+	  const tick = () => { if (window.require && window.require.config) resolve(); else setTimeout(tick, 20); };
+	  tick();
+	});
+  }
+
 if (!window.__MONACO_CONFIGURED__) {
 	window.__MONACO_CONFIGURED__ = true;
+	// Detect runtime env for asset bases
+	const href = (typeof document !== 'undefined' ? (document.baseURI || window.location?.href || '') : '');
+	const isViteDev = typeof window !== 'undefined' && (window.location?.port === '5173' || /localhost:5173$/.test(window.location?.host || ''));
+	const isDist = /\/dist\//.test(href);
+	const monacoBaseUrl = isViteDev
+		? new URL('/monaco-editor/min/', window.location.origin).toString()
+		: (isDist
+			? new URL('./node_modules/monaco-editor/min/', document.baseURI).toString()
+			: new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString());
 	if (window.require && window.require.config) {
-		const monacoBase = new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString();
 		require.config({ 
-			paths: { vs: monacoBase + 'vs' },
+			paths: { vs: monacoBaseUrl + 'vs' },
 			// Optimize worker loading - only load necessary workers
-			'vs/editor/editor.worker': monacoBase + 'vs/editor/editor.worker.js',
-			'vs/language/json/json.worker': monacoBase + 'vs/language/json/json.worker.js',
-			'vs/language/css/css.worker': monacoBase + 'vs/language/css/css.worker.js',
-			'vs/language/html/html.worker': monacoBase + 'vs/language/html/html.worker.js',
-			'vs/language/typescript/ts.worker': monacoBase + 'vs/language/typescript/ts.worker.js'
+			'vs/editor/editor.worker': monacoBaseUrl + 'vs/editor/editor.worker.js',
+			'vs/language/json/json.worker': monacoBaseUrl + 'vs/language/json/json.worker.js',
+			'vs/language/css/css.worker': monacoBaseUrl + 'vs/language/css/css.worker.js',
+			'vs/language/html/html.worker': monacoBaseUrl + 'vs/language/html/html.worker.js',
+			'vs/language/typescript/ts.worker': monacoBaseUrl + 'vs/language/typescript/ts.worker.js'
 		});
 	}
 	
 	// Optimized worker environment - only create workers when needed
 	window.MonacoEnvironment = {
-		baseUrl: new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString(),
+		baseUrl: monacoBaseUrl,
 		getWorkerUrl: function (moduleId, label) {
 			// Only load workers for languages that are actually used
 			const usedWorkers = {
@@ -34,7 +50,7 @@ if (!window.__MONACO_CONFIGURED__) {
 				return null; // Don't create unnecessary workers
 			}
 			
-			const abs = new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString();
+			const abs = monacoBaseUrl;
 			const code = `self.MonacoEnvironment = { baseUrl: '${abs}' }; importScripts('${abs}${workerPath}');`;
 			const blob = new Blob([code], { type: 'text/javascript' });
 			return URL.createObjectURL(blob);
@@ -381,7 +397,7 @@ async function restoreSession() {
 			}, 60);
 		} else {
 			resolve();
-	}
+}
 	});
 	// Restore split state
 	if (data.split && data.split.on) {
@@ -592,7 +608,7 @@ window.addEventListener('DOMContentLoaded', () => {
 				try { document.getElementById('fileTree')?.classList?.remove('loading'); } catch {}
 				isOpeningFolder = false;
 			}
-	}
+}
 
 	document.addEventListener('click', async (e) => {
 		const target = e.target;
@@ -889,7 +905,6 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && !cmdPalette.classList.contains('hidden')) { e.preventDefault(); closeCmdPalette(); return; }
-		if (e.ctrlKey && e.key === ',') { e.preventDefault(); openPrefs(); }
 		if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); editor?.trigger('kb', 'undo', null); }
 		if (e.ctrlKey && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); editor?.trigger('kb', 'redo', null); }
 		if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); mFileSave?.click(); }
@@ -918,9 +933,7 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		if (e.ctrlKey && e.key.toLowerCase() === 'n') { e.preventDefault(); mFileNew?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault(); mFileNewWindow?.click(); }
 	if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); mViewToggleSidebar?.click(); }
-	});
-
-
+});
 
 	updateEmptyState();
 
@@ -1082,7 +1095,9 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 			applyTerminalResizeFor(id);
 			if (window.bridge.terminal.write) {
 				window.bridge.terminal.write(id, 'clear\r');
-				setTimeout(() => window.bridge.terminal.write(id, 'echo "Terminal ready!"\r'), 80);
+				setTimeout(() => {
+					window.bridge.terminal.write(id, 'echo "Terminal ready!"\r');
+				}, 80);
 			}
 		}, 120);
 
@@ -1340,7 +1355,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 					termInstance.focus();
 					
 					// Send initial commands to ensure prompt appears
-					if (window.bridge.terminal.write && termId) {
+					if (window.bridge.terminal.write) {
 						window.bridge.terminal.write(termId, 'clear\r');
 						setTimeout(() => {
 							window.bridge.terminal.write(termId, 'echo "Terminal ready!"\r');
@@ -1984,22 +1999,46 @@ document.addEventListener('DOMContentLoaded', () => {
 		function basename(p) { return p.split('/').pop(); }
 
 		// Add missing event listeners
-		window.addEventListener('barge:pending-open', () => {
-			if (window.__PENDING_OPEN__) {
-				const p = window.__PENDING_OPEN__;
-				// Only open file if Monaco is ready
-				if (monacoRef) {
-					openFileInTab(p.filePath, p.content);
-					window.__PENDING_OPEN__ = null;
-				} else {
-					// Monaco still not ready, keep it pending
-					console.log('Monaco not ready, keeping file pending:', p.filePath);
-					// Don't clear the pending file, keep it for when Monaco is ready
+		window.addEventListener('barge:pending-open', async () => {
+			const p = window.__PENDING_OPEN__;
+			if (!p) return;
+			if (monacoRef) { openFileInTab(p.filePath, p.content); window.__PENDING_OPEN__ = null; return; }
+			if (!window.__MONACO_BOOT__) {
+			  window.__MONACO_BOOT__ = true;
+			  await waitForAmdLoader();
+			  require(['vs/editor/editor.main'], function () {
+				monacoRef = window.monaco;
+				try {
+				  monacoRef.editor.defineTheme('barge-light', { base: 'vs', inherit: true, rules: [], colors: {} });
+				  monacoRef.editor.defineTheme('barge-dark', { base: 'vs-dark', inherit: true, rules: [], colors: {} });
+				} catch {}
+				const editorContainer = document.getElementById('editor');
+				try {
+				  editor = monacoRef.editor.create(editorContainer, {
+					value: '',
+					language: 'plaintext',
+					automaticLayout: true,
+					minimap: { enabled: true },
+					theme: (settings?.theme === 'light') ? 'barge-light' : 'barge-dark',
+				  });
+				} catch (e) { console.error('Failed to create Monaco editor lazily', e); }
+				try { window.dispatchEvent(new Event('barge:monaco-ready')); } catch {}
+				if (window.__PENDING_OPEN__) {
+				  const x = window.__PENDING_OPEN__;
+				  openFileInTab(x.filePath, x.content);
+				  window.__PENDING_OPEN__ = null;
 				}
+			  });
+			  return;
 			}
-		});
-
-		// Add Monaco ready event listener
+			const onReady = () => {
+			  window.removeEventListener('barge:monaco-ready', onReady);
+			  const x = window.__PENDING_OPEN__;
+			  if (x) { openFileInTab(x.filePath, x.content); window.__PENDING_OPEN__ = null; }
+			};
+			window.addEventListener('barge:monaco-ready', onReady);
+		  });
+		// Monaco ready event listener
 		window.addEventListener('barge:monaco-ready', () => {
 			console.log('Monaco is ready, processing pending files...');
 			// Process any pending files now that Monaco is ready
@@ -2371,7 +2410,7 @@ document.addEventListener('DOMContentLoaded', () => {
 										const model = monacoRef.editor.getModel(uri);
 										if (model) {
 											if (activePane === 'right' && editor2Instance) editor2Instance.setModel(model); else editor.setModel(model);
-											const pos = { lineNumber: m.startLineNumber, column: m.startColumn };
+											const pos = { lineNumber: m.startLineNumber, startColumn: m.startColumn };
 											editor.revealPositionInCenter(pos);
 											editor.setPosition(pos);
 										}
@@ -2475,7 +2514,9 @@ document.addEventListener('DOMContentLoaded', () => {
 				const btn = document.createElement('button'); btn.className = 'recent-item';
 				const name = (p.split('/').pop() || p);
 				btn.innerHTML = `<div><div>${name}</div><div class="path">${p}</div></div>`;
-				btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); onPick(p); hideRecentPopovers(); });
+				btn.addEventListener('click', (e) => {
+					e.preventDefault(); e.stopPropagation(); onPick(p); hideRecentPopovers();
+				});
 				wrap.appendChild(btn);
 			}
 			return wrap;
@@ -2495,12 +2536,12 @@ document.addEventListener('DOMContentLoaded', () => {
 	setTimeout(() => document.addEventListener('click', close, true), 0);
 }
 
-	// Bind recent popovers and view actions inside scope
-	safeBind(mFileOpenRecentFile, 'click', (e) => { e.preventDefault(); e.stopPropagation(); showRecentModal('file'); });
-	safeBind(mFileOpenRecentFolder, 'click', (e) => { e.preventDefault(); e.stopPropagation(); showRecentModal('folder'); });
+		// Bind recent popovers and view actions inside scope
+		safeBind(mFileOpenRecentFile, 'click', (e) => { e.preventDefault(); e.stopPropagation(); showRecentModal('file'); });
+		safeBind(mFileOpenRecentFolder, 'click', (e) => { e.preventDefault(); e.stopPropagation(); showRecentModal('folder'); });
 	
-	safeBind(mViewFullScreen, 'click', (e) => { e.preventDefault(); e.stopPropagation(); window.bridge?.window?.toggleFullScreen?.(); });
-	safeBind(mViewZenMode, 'click', (e) => { e.preventDefault(); e.stopPropagation(); document.body.classList.toggle('zen'); });
+		safeBind(mViewFullScreen, 'click', (e) => { e.preventDefault(); e.stopPropagation(); window.bridge?.window?.toggleFullScreen?.(); });
+		safeBind(mViewZenMode, 'click', (e) => { e.preventDefault(); e.stopPropagation(); document.body.classList.toggle('zen'); });
 
 	function showRecentModal(kind) {
 		const modal = document.getElementById('recentModal'); if (!modal) return;
@@ -2810,14 +2851,26 @@ function forceClosePath(targetPath) {
 		const idx = openTabs.findIndex(t => t.path === targetPath);
 		if (idx === -1) return;
 		const tab = openTabs[idx];
-		// Remove DOM
-		try { tab._el?.remove?.(); } catch {}
-		openTabs.splice(idx, 1);
-		// Dispose model
+		
+		// Add to closed stack for reopening
 		const model = modelsByPath.get(targetPath);
-		if (model) { try { model.dispose?.(); } catch {} modelsByPath.delete(targetPath); }
-		// Activate another tab if needed
+		if (model) {
+			closedStack.push({
+				path: targetPath,
+				content: model.getValue()
+			});
+		}
+		
+		tab._el.remove();
+		openTabs.splice(idx, 1);
+		console.log('openTabs after close:', openTabs.map(t => t.path));
+		
+		if (model) {
+			model.dispose();
+			modelsByPath.delete(targetPath);
+		}
 		if (activeTabPath === targetPath) {
+			console.log('Closing active tab, switching to tab to the left or clearing editor');
 			if (openTabs.length > 0) {
 				// Find the tab to the left of the closed tab
 				let nextTabPath = null;
@@ -2849,3 +2902,351 @@ function domClosePath(targetPath) {
 	} catch {}
 	try { window.__forceClosePath?.(targetPath); } catch {}
 }
+
+// Ensure xterm CSS is loaded only when needed
+let __xtermCssInjected = false;
+async function ensureXtermCssLoaded() {
+	if (__xtermCssInjected) return true;
+	try {
+		const existing = document.querySelector('link[data-xterm-css="1"]');
+		if (existing) { __xtermCssInjected = true; return true; }
+		const link = document.createElement('link');
+		link.rel = 'stylesheet';
+		// Vite dev uses /xterm, dist uses ./node_modules, raw source uses ../../node_modules
+		const href = (typeof document !== 'undefined' ? (document.baseURI || window.location?.href || '') : '');
+		const isViteDev = typeof window !== 'undefined' && (window.location?.port === '5173' || /localhost:5173$/.test(window.location?.host || ''));
+		const isDist = /\/dist\//.test(href);
+		link.href = isViteDev ? '/xterm/css/xterm.css' : (isDist ? './node_modules/xterm/css/xterm.css' : '../../node_modules/xterm/css/xterm.css');
+		link.dataset.xtermCss = '1';
+		return await new Promise((resolve) => {
+			link.onload = () => { __xtermCssInjected = true; resolve(true); };
+			link.onerror = () => { console.error('Failed to load xterm.css'); resolve(false); };
+			document.head.appendChild(link);
+		});
+	} catch (e) {
+		console.error('xterm css inject failed', e);
+		return false;
+	}
+}
+
+async function createTerminal() {
+	// Ensure xterm
+	const xtermLoaded = await ensureXtermLoadedWithFallback();
+	const cssOk = await ensureXtermCssLoaded();
+	if (!xtermLoaded) {
+		console.error('✗ xterm failed to load completely');
+		alert('Terminal library failed to load.');
+		return;
+	}
+	attachGlobalTerminalOnData();
+
+	// Create view container
+	const view = document.createElement('div');
+	view.className = 'terminal-view';
+	const xtermHost = document.createElement('div');
+	xtermHost.className = 'xterm';
+	view.appendChild(xtermHost);
+	terminalViews?.appendChild(view);
+
+	// Create terminal instance
+	let instance;
+	try {
+		instance = new window.Terminal({
+			convertEol: true,
+			cursorBlink: true,
+			fontSize: 14,
+			fontFamily: 'JetBrains Mono, Fira Code, Menlo, Consolas, monospace',
+			scrollback: 1000,
+			theme: getTerminalThemeForCurrentSettings()
+		});
+		instance.open(xtermHost);
+	} catch (error) {
+		console.error('✗ Failed to create terminal instance:', error);
+		view.remove();
+		return;
+	}
+
+	// Create backend pty
+	const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || undefined);
+	if (!created?.id) {
+		console.error('✗ Terminal create failed:', created);
+		instance.dispose?.();
+		view.remove();
+		return;
+	}
+	const id = created.id;
+
+	// Wire input -> backend
+	instance.onData((data) => {
+		if (window.bridge.terminal.write) window.bridge.terminal.write(id, data);
+	});
+
+	// Track
+	terminals.set(id, { instance, viewEl: view, tabEl: null });
+	terminalOrder.push(id);
+	renderTerminalTabs();
+
+	// Observe resize on this view
+	const ro = new ResizeObserver(() => setTimeout(() => applyTerminalResizeFor(id), 100));
+	ro.observe(xtermHost);
+
+	// Activate this terminal
+	switchTerminal(id);
+
+	// Initial prompt
+	setTimeout(() => {
+		applyTerminalResizeFor(id);
+		if (window.bridge.terminal.write) {
+			window.bridge.terminal.write(id, 'clear\r');
+			setTimeout(() => {
+				window.bridge.terminal.write(id, 'echo "Terminal ready!"\r');
+			}, 80);
+		}
+	}, 120);
+
+	return id;
+}
+
+async function ensureXtermLoaded() {
+	console.log('=== XTERM LOADING START ===');
+	console.log('window.Terminal available:', !!window.Terminal);
+	
+	// Check if Terminal is already available
+	if (window.Terminal) {
+		console.log('✓ Terminal already available');
+		return true;
+	}
+	
+	console.log('Terminal not available, trying AMD loader...');
+	
+	// Try to load xterm using the AMD loader
+	try {
+		// Configure AMD paths for xterm
+		if (window.require && window.require.config) {
+			require.config({
+				paths: {
+					'xterm': '../../node_modules/xterm/lib/xterm'
+			}
+		});
+	}
+
+			// Load xterm using AMD
+			return new Promise((resolve) => {
+				require(['xterm'], (xterm) => {
+					console.log('✓ xterm loaded via AMD:', xterm);
+					// Make Terminal available globally
+					window.Terminal = xterm.Terminal;
+					window.TerminalAddon = xterm.TerminalAddon;
+					resolve(true);
+				}, (error) => {
+					console.error('✗ AMD xterm loading failed:', error);
+					resolve(false);
+				});
+			});
+		} catch (error) {
+			console.error('✗ AMD loading attempt failed:', error);
+			return false;
+		}
+	}
+
+	// Simplified fallback - no CDN since CSP blocks it
+	async function ensureXtermLoadedWithFallback() {
+		console.log('=== XTERM LOADING WITH FALLBACK ===');
+		
+		// Just try the local loading since CDN is blocked by CSP
+		const success = await ensureXtermLoaded();
+		if (success) {
+			return true;
+		}
+		
+		console.error('✗ xterm failed to load - check if xterm is properly installed');
+		console.error('Trying to manually check xterm script...');
+		
+		// Try to manually check if the script loaded
+		const scripts = Array.from(document.scripts);
+		const xtermScript = scripts.find(s => s.src.includes('xterm'));
+		console.log('Xterm script found:', !!xtermScript);
+		if (xtermScript) {
+			console.log('Xterm script src:', xtermScript.src);
+			console.log('Xterm script loaded:', xtermScript.readyState);
+		}
+		
+		return false;
+	}
+
+	safeBind(mViewToggleTerminal, 'click', async () => {
+		terminalPanel?.classList.toggle('hidden');
+		if (!terminalPanel?.classList.contains('hidden')) {
+			if (!terminalOrder.length) {
+				await createTerminal();
+					} else {
+				const active = terminals.get(termId);
+				active?.instance?.focus?.();
+				setTimeout(() => applyTerminalResizeFor(termId), 60);
+			}
+		}
+		updateViewMenuState?.();
+	});
+		// Fixed terminal initialization with improved xterm loading
+		async function ensureTerminal() {
+			console.log('=== TERMINAL INITIALIZATION START ===');
+			
+			if (!termInstance) {
+				// Step 1: Ensure xterm is loaded with fallback
+				console.log('Step 1: Loading xterm...');
+				const xtermLoaded = await ensureXtermLoadedWithFallback();
+				
+				if (!xtermLoaded) {
+					console.error('✗ xterm failed to load completely');
+					alert('Terminal library failed to load. Please check your internet connection and refresh the page.');
+					return;
+				}
+				console.log('✓ xterm loaded successfully');
+				
+				// Step 2: Check terminal element
+				console.log('Step 2: Checking terminal element...');
+				const terminalEl = document.getElementById('terminal');
+				if (!terminalEl) {
+					console.error('✗ Terminal element not found');
+					return;
+				}
+				console.log('✓ Terminal element found');
+				
+				// Step 3: Check terminal panel visibility
+				console.log('Step 3: Checking terminal panel...');
+				const terminalPanel = document.getElementById('terminalPanel');
+				if (terminalPanel?.classList.contains('hidden')) {
+					console.log('Making terminal panel visible...');
+					terminalPanel.classList.remove('hidden');
+				}
+				console.log('✓ Terminal panel visible');
+				
+				// Step 4: Create terminal instance
+				console.log('Step 4: Creating terminal instance...');
+				try {
+					termInstance = new window.Terminal({
+						convertEol: true,
+						cursorBlink: true,
+						theme: {
+							background: '#0b0d12',
+							foreground: '#ffffff',
+							cursor: '#ffffff',
+							selection: '#264f78'
+						},
+						fontSize: 14,
+						fontFamily: 'JetBrains Mono, Fira Code, Menlo, Consolas, monospace',
+						rows: 24,
+						cols: 80,
+						scrollback: 1000
+					});
+					console.log('✓ Terminal instance created');
+				} catch (error) {
+					console.error('✗ Failed to create terminal instance:', error);
+					alert('Failed to create terminal: ' + error.message);
+					return;
+				}
+				
+				// Step 5: Open terminal in DOM
+				console.log('Step 5: Opening terminal in DOM...');
+				try {
+					termInstance.open(terminalEl);
+					console.log('✓ Terminal opened in DOM');
+				} catch (error) {
+					console.error('✗ Failed to open terminal:', error);
+					return;
+				}
+				
+				// Step 6: Check bridge
+				console.log('Step 6: Checking bridge...');
+				if (!window.bridge || !window.bridge.terminal) {
+					console.error('✗ Terminal bridge not available');
+					termInstance.write('Terminal bridge not available.\r\n');
+					return;
+				}
+				console.log('✓ Terminal bridge available');
+				
+				// Step 7: Create terminal process
+				console.log('Step 7: Creating terminal process...');
+				try {
+					const created = await window.bridge.terminal.create(80, 24, currentWorkspaceRoot || undefined);
+					console.log('Terminal create result:', created);
+					
+					if (!created || !created.id) {
+						console.error('✗ Terminal create failed:', created);
+						termInstance.write('Failed to create terminal process.\r\n');
+						return;
+					}
+					
+					termId = created.id;
+					console.log('✓ Terminal process created with ID:', termId);
+				} catch (error) {
+					console.error('✗ Terminal process creation failed:', error);
+					termInstance.write('Terminal process creation failed: ' + error.message + '\r\n');
+					return;
+				}
+				
+				// Step 8: Set up data handlers
+				console.log('Step 8: Setting up data handlers...');
+				window.bridge.terminal.onData((p) => {
+					if (p.id === termId && termInstance) {
+						termInstance.write(p.data);
+					}
+				});
+				
+				termInstance.onData((data) => {
+					if (termId && window.bridge.terminal.write) {
+						window.bridge.terminal.write(termId, data);
+					}
+				});
+				console.log('✓ Data handlers set up');
+				
+				// Step 9: Set up resize handling
+				console.log('Step 9: Setting up resize handling...');
+				const applyResize = () => {
+					const el = document.getElementById('terminal');
+					if (!el || !termInstance) return;
+					
+					const cols = Math.max(20, Math.floor(el.clientWidth / 9));
+					const rows = Math.max(5, Math.floor(el.clientHeight / 18));
+					
+					try {
+						termInstance.resize(cols, rows);
+						if (window.bridge.terminal.resize && termId) {
+							window.bridge.terminal.resize(termId, cols, rows);
+						}
+					} catch (err) {
+						console.error('Resize failed:', err);
+					}
+				};
+				
+				const resizeObserver = new ResizeObserver(() => {
+					setTimeout(applyResize, 100);
+				});
+				resizeObserver.observe(terminalEl);
+				console.log('✓ Resize handling set up');
+				
+				// Step 10: Initial setup
+				console.log('Step 10: Initial setup...');
+				setTimeout(() => {
+					applyResize();
+					termInstance.focus();
+					
+					// Send initial commands to ensure prompt appears
+					if (window.bridge.terminal.write) {
+						window.bridge.terminal.write(termId, 'clear\r');
+						setTimeout(() => {
+							window.bridge.terminal.write(termId, 'echo "Terminal ready!"\r');
+						}, 100);
+					}
+				}, 300);
+				
+				console.log('✓ Terminal fully initialized');
+				console.log('=== TERMINAL INIT COMPLETE ===');
+				
+			} else {
+				console.log('Terminal already exists, focusing...');
+				termInstance.focus();
+		}
+}
+
+// end of renderer.js

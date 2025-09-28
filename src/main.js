@@ -10,6 +10,20 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
+// GPU control for weaker hardware: allow opting in via CLI or env
+const shouldDisableGpu = process.argv.includes('--disable-gpu') || process.env.BARGE_DISABLE_GPU === '1';
+if (shouldDisableGpu) {
+	try {
+		app.commandLine.appendSwitch('disable-gpu');
+		app.commandLine.appendSwitch('disable-gpu-compositing');
+		// Optional: reduce raster threads
+		app.commandLine.appendSwitch('num-raster-threads', '1');
+		// Optional: disable accelerated 2d canvas
+		app.commandLine.appendSwitch('disable-accelerated-2d-canvas');
+		console.log('[Barge] GPU disabled via flag/env for weaker hardware');
+	} catch {}
+}
+
 let mainWindow = null;
 let splashWindow = null;
 let showMainFallbackTimer = null;
@@ -109,7 +123,23 @@ async function createWindow() {
 	});
 	try { mainWindow.setMinimumSize(1100, 720); } catch {}
 
-	await mainWindow.loadFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'));
+	// Load renderer: support Vite dev server if provided
+	const devServerUrl = process.env.VITE_DEV_SERVER_URL;
+	if (devServerUrl) {
+		await mainWindow.loadURL(devServerUrl.endsWith('/') ? devServerUrl : devServerUrl + '/');
+	} else {
+		await (async () => {
+			try {
+				if (process.env.NODE_ENV === 'production') {
+					const distIndex = path.join(process.cwd(), 'dist', 'index.html');
+					await fs.access(distIndex);
+					await mainWindow.loadFile(distIndex);
+					return;
+				}
+			} catch {}
+			await mainWindow.loadFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'));
+		})();
+	}
 
 	// Fallback: if renderer never signals readiness within 10s, show main anyway
 	clearTimeout(showMainFallbackTimer);
