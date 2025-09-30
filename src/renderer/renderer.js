@@ -982,7 +982,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		if (!rec) return;
 		const el = rec.viewEl.querySelector('.xterm');
 		if (!el || !rec.instance) return;
-		const cols = Math.max(20, Math.floor(el.clientWidth / 9));
+		const cols = Math.max(20, Math.floor(el.clientWidth / 8.5));
 		const rows = Math.max(5, Math.floor(el.clientHeight / 18));
 		try {
 			rec.instance.resize(cols, rows);
@@ -994,6 +994,14 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		}
 	}
 	window.applyTerminalResizeFor = applyTerminalResizeFor;
+
+	// Debounced terminal resize scheduler (per-terminal)
+	const __termResizeTimers = new Map();
+	function scheduleTerminalResize(id, delay = 120) {
+		try { const t = __termResizeTimers.get(id); if (t) clearTimeout(t); } catch {}
+		const timer = setTimeout(() => { try { applyTerminalResizeFor(id); } catch {} }, delay);
+		__termResizeTimers.set(id, timer);
+	}
 	function attachGlobalTerminalOnData() {
 		if (terminalOnDataBound) return;
 		terminalOnDataBound = true;
@@ -1073,19 +1081,19 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		console.log('terminals.size:', terminals.size);
 		terminalOrder.push(id);
 		window.renderTerminalTabs?.();
-		// Observe resize on this view
-		const ro = new ResizeObserver(() => setTimeout(() => applyTerminalResizeFor(id), 100));
+		// Observe resize on this view (debounced)
+		const ro = new ResizeObserver(() => scheduleTerminalResize(id, 120));
 		ro.observe(xtermHost);
 
 		// Activate this terminal
-		switchTerminal(id);
+		window.switchTerminal?.(id);
 		console.log('Sending initial commands to terminal:', id);
 
 		// Initial prompt
 		setTimeout(() => {
-			applyTerminalResizeFor(id);
+			window.applyTerminalResizeFor?.(id);
 			if (window.bridge.terminal.write) {
-				window.bridge.terminal.write(id, 'clear\r');
+				window.bridge.terminal.write(id, '\x1b[2J\x1b[H');
 				setTimeout(() => {
 					window.bridge.terminal.write(id, 'echo "Terminal ready!"\r');
 				}, 80);
@@ -1197,7 +1205,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 					} else {
 				const active = terminals.get(termId);
 				active?.instance?.focus?.();
-				setTimeout(() => applyTerminalResizeFor(termId), 60);
+				scheduleTerminalResize(termId, 100);
 			}
 		}
 		updateViewMenuState?.();
@@ -1322,7 +1330,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 					const el = document.getElementById('terminal');
 					if (!el || !termInstance) return;
 					
-					const cols = Math.max(20, Math.floor(el.clientWidth / 9));
+					const cols = Math.max(20, Math.floor(el.clientWidth / 8.5));
 					const rows = Math.max(5, Math.floor(el.clientHeight / 18));
 					
 					try {

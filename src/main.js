@@ -3,12 +3,14 @@ import { shell } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import pty from 'node-pty-prebuilt-multiarch';
 import { tmpdir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // GPU control for weaker hardware: allow opting in via CLI or env
 const shouldDisableGpu = process.argv.includes('--disable-gpu') || process.env.BARGE_DISABLE_GPU === '1';
@@ -40,26 +42,46 @@ async function safeReadText(filePath) {
 			const buf = await fs.readFile(filePath);
 			return buf.toString('latin1');
 		} catch (e2) {
-			throw e2;
 		}
 	}
 }
 
 function fadeIn(win, durationMs = 220, target = 1) {
-	return new Promise((resolve) => {
-		if (!win || win.isDestroyed?.()) { resolve(); return; }
-		try { win.setOpacity(0); } catch {}
-		try { if (!win.isVisible?.()) win.show(); } catch {}
-		const start = Date.now();
-		const tick = () => {
-			const t = Math.min(1, (Date.now() - start) / Math.max(1, durationMs));
-			const eased = 1 - Math.pow(1 - t, 3);
-			try { win.setOpacity(0 + (target - 0) * eased); } catch {}
-			if (t < 1 && !win.isDestroyed?.()) setTimeout(tick, 16); else resolve();
-		};
-		tick();
-	});
+    return new Promise((resolve) => {
+        if (!win || win.isDestroyed?.()) { resolve(); return; }
+        try { win.setOpacity(0); } catch {}
+        try { if (!win.isVisible?.()) win.show(); } catch {}
+        const start = Date.now();
+        const tick = () => {
+            const t = Math.min(1, (Date.now() - start) / Math.max(1, durationMs));
+            const eased = 1 - Math.pow(1 - t, 3);
+            try { win.setOpacity(0 + (target - 0) * eased); } catch {}
+            if (t < 1 && !win.isDestroyed?.()) setTimeout(tick, 16); else resolve();
+        };
+        tick();
+    });
 }
+
+// Read immediate children (lazy) of a directory
+ipcMain.handle('folder:readChildren', async (_evt, { dir }) => {
+    try {
+        if (!dir) return { ok: false, error: 'Missing dir' };
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        const items = await Promise.all(entries.map(async (ent) => {
+            const fullPath = path.join(dir, ent.name);
+            if (ent.isDirectory()) return { type: 'dir', name: ent.name, path: fullPath };
+            if (ent.isFile()) return { type: 'file', name: ent.name, path: fullPath };
+            return null;
+        }));
+        const children = items.filter(Boolean).sort((a, b) => {
+            if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+            return a.name.localeCompare(b.name);
+        });
+        return { ok: true, dir, children };
+    } catch (e) {
+        return { ok: false, error: String(e) };
+    }
+});
 
 function fadeOut(win, durationMs = 180, from = null) {
 	return new Promise((resolve) => {
@@ -84,43 +106,36 @@ async function createWindow() {
 		frame: false,
 		resizable: false,
 		transparent: false,
-		alwaysOnTop: false,
-		show: true,
 		backgroundColor: '#0f1115',
 		webPreferences: { sandbox: true }
 	});
 	try {
 		// Embed real logo bytes (fallback to file URL if embedding fails)
-		const logoPath = path.join(process.cwd(), 'src', 'assets', 'barge.png');
+		const logoPath = path.join(__dirname, 'assets', 'barge.png');
 		let logoSrc = pathToFileURL(logoPath).toString();
 		try {
 			const buf = await fs.readFile(logoPath);
 			logoSrc = `data:image/png;base64,${buf.toString('base64')}`;
 		} catch {}
-		const splashHtml = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html><html><head><meta charset=\"utf-8\"><title>Loading…</title><style>html,body{margin:0;height:100%;background:#0f1115;color:#e5e7eb;font-family:system-ui,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',sans-serif} .wrap{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px} .logo{width:48px;height:48px;opacity:.98;image-rendering:auto} .spinner{width:28px;height:28px;border:3px solid #1f2937;border-top-color:#22c55e;border-right-color:#06b6d4;border-radius:50%;animation:spin .8s linear infinite;margin-top:6px}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class=\"wrap\"><img class=\"logo\" alt=\"Barge\" src=\"${logoSrc}\"/><div>Loading Barge…</div><div class=\"spinner\"></div></div></body></html>`)} `;
-		await splashWindow.loadURL(splashHtml);
-		try { splashWindow.setOpacity(0); } catch {}
-		await fadeIn(splashWindow, 220, 1);
+		// Prepare main window hidden
+		mainWindow = new BrowserWindow({
+			width: 1400,
+			height: 900,
+			minWidth: 1100,
+			minHeight: 720,
+			resizable: true,
+			frame: false,
+			titleBarStyle: 'hidden',
+			backgroundColor: '#0f1115',
+			show: false,
+			webPreferences: {
+				preload: path.join(__dirname, 'preload.cjs'),
+				contextIsolation: true,
+				nodeIntegration: false,
+				sandbox: false,
+			},
+		});
 	} catch {}
-
-	// Prepare main window hidden
-	mainWindow = new BrowserWindow({
-		width: 1400,
-		height: 900,
-		minWidth: 1100,
-		minHeight: 720,
-		resizable: true,
-		frame: false,
-		titleBarStyle: 'hidden',
-		backgroundColor: '#0f1115',
-		show: false,
-		webPreferences: {
-			preload: path.join(process.cwd(), 'src', 'preload.cjs'),
-			contextIsolation: true,
-			nodeIntegration: false,
-			sandbox: false,
-		},
-	});
 	try { mainWindow.setMinimumSize(1100, 720); } catch {}
 
 	// Load renderer: support Vite dev server if provided
@@ -131,13 +146,13 @@ async function createWindow() {
 		await (async () => {
 			try {
 				if (process.env.NODE_ENV === 'production') {
-					const distIndex = path.join(process.cwd(), 'dist', 'index.html');
+					const distIndex = path.join(__dirname, '..', 'dist', 'index.html');
 					await fs.access(distIndex);
 					await mainWindow.loadFile(distIndex);
 					return;
 				}
 			} catch {}
-			await mainWindow.loadFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'));
+			await mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 		})();
 	}
 
@@ -320,16 +335,24 @@ ipcMain.handle('file:writeByPath', async (_evt, { filePath, content }) => {
 ipcMain.handle('search:inFolder', async (_evt, { root, query, caseSensitive = false, isRegex = false, maxResults = 500 }) => {
 	const results = [];
 	const re = isRegex ? new RegExp(query, caseSensitive ? 'g' : 'gi') : null;
+	const IGNORE_DIRS = new Set(['node_modules', '.git', '.venv', '.idea', '.vscode', 'dist', 'build', 'out', '.next', '.output']);
+	const MAX_SIZE = 2 * 1024 * 1024; // 2 MB cap per file
+	const BIN_EXT = /\.(png|jpe?g|gif|bmp|ico|pdf|zip|gz|tar|tgz|7z|rar|mp3|mp4|mov|webm|mkv|wav|flac|ogg|woff2?|ttf|otf|eot|wasm|class|jar|exe|dll|so)$/i;
 	async function walk(dir) {
 		let entries;
 		try { entries = await fs.readdir(dir, { withFileTypes: true }); } catch { return; }
 		for (const ent of entries) {
 			const full = path.join(dir, ent.name);
 			if (ent.isDirectory()) {
-				if (ent.name === 'node_modules' || ent.name === '.git' || ent.name.startsWith('.')) continue;
+				if (IGNORE_DIRS.has(ent.name) || ent.name.startsWith('.')) continue;
 				await walk(full);
 			} else if (ent.isFile()) {
 				try {
+					// Skip large or binary-like files early
+					let st; try { st = await fs.stat(full); } catch { continue; }
+					if (st && st.size > MAX_SIZE) continue;
+					if (BIN_EXT.test(ent.name) || ent.name.includes('.min.')) continue;
+
 					const content = await fs.readFile(full, 'utf8');
 					const lines = content.split('\n');
 					for (let i = 0; i < lines.length; i++) {

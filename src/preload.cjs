@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('bridge', {
 	createFolder: async ({ root, name }) => ipcRenderer.invoke('fs:createFolder', { root, name }),
 	createFile: async ({ dir, name }) => ipcRenderer.invoke('fs:createFile', { dir, name }),
 	readFolderTree: async (root) => ipcRenderer.invoke('folder:readTree', { root }),
+	readFolderChildren: async (dir) => ipcRenderer.invoke('folder:readChildren', { dir }),
 	renamePath: async ({ oldPath, newName }) => ipcRenderer.invoke('fs:renamePath', { oldPath, newName }),
 	deletePath: async ({ target }) => ipcRenderer.invoke('fs:deletePath', { target }),
 	movePath: async ({ sourcePath, targetDir, newName }) => ipcRenderer.invoke('fs:movePath', { sourcePath, targetDir, newName }),

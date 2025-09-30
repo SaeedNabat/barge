@@ -14,9 +14,11 @@
     "predev": "npm run dev:prepare",
     "dev": "vite --port 5173",
     "dev:electron": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
-    "dev:all": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm:dev\" \"npm:dev:electron\"",
+    "dev:electron:wait": "wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .",
+    "dev:all": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm:dev\" \"npm:dev:electron:wait\"",
     "dev:electron:no-gpu": "cross-env VITE_DEV_SERVER_URL=http://localhost:5173 BARGE_DISABLE_GPU=1 electron .",
-    "dev:all:no-gpu": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm:dev\" \"npm:dev:electron:no-gpu\""
+    "dev:electron:wait:no-gpu": "wait-on http://localhost:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 BARGE_DISABLE_GPU=1 electron .",
+    "dev:all:no-gpu": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"npm:dev\" \"npm:dev:electron:wait:no-gpu\""
   },
   "keywords": [],
   "author": "",
