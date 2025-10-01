@@ -1059,31 +1059,6 @@ const sidebarOpenFolder = document.getElementById('sidebarOpenFolder');
 safeBind(sidebarOpenFile, 'click', openFileFlow);
 safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 
-	// Collapse All button in file tree
-	const collapseAllBtn = document.getElementById('collapseAllBtn');
-	safeBind(collapseAllBtn, 'click', () => {
-		const fileTree = document.getElementById('fileTree');
-		if (!fileTree) return;
-		
-		// Collapse all folders
-		const allChildren = fileTree.querySelectorAll('.children');
-		allChildren.forEach(children => {
-			children.style.display = 'none';
-		});
-		
-		// Set all folder items to collapsed state
-		const allFolderItems = fileTree.querySelectorAll('.item.has-children');
-		allFolderItems.forEach(item => {
-			item.classList.add('collapsed');
-		});
-		
-		// Reset all carets to collapsed state
-		const allCarets = fileTree.querySelectorAll('.caret');
-		allCarets.forEach(caret => {
-			caret.classList.remove('open');
-		});
-	});
-
 	document.addEventListener('click', (e) => { const t = e.target; if (t instanceof Element && t.id === 'sidebarNewFolder') { e.preventDefault(); window.createFolderFlow(); } }, true);
 
 	const mViewToggleTerminal = document.getElementById('mViewToggleTerminal');
