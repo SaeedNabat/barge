@@ -1582,60 +1582,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
 		// Add missing functions for file tree and editor functionality
 		function iconSvg(kind, filename = '') {
+			// Modern folder icon with outline style
 			if (kind === 'dir') {
-				return '<svg width="14" height="14" viewBox="0 0 24 24" fill="#4ade80"><path d="M3 7h6l2 2h10v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
+				return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" fill="#60a5fa" opacity="0.9"/><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" stroke="#3b82f6" stroke-width="1.5" fill="none"/></svg>';
 			}
 			
 			// Get file extension for color coding
 			const ext = filename.split('.').pop()?.toLowerCase();
 			
-			// Color-coded file icons based on extension
+			// Modern color palette for file icons
 			const iconColors = {
 				// Code files
-				'js': '#f7df1e', 'jsx': '#61dafb', 'ts': '#3178c6', 'tsx': '#61dafb',
+				'js': '#f7df1e', 'jsx': '#61dafb', 'ts': '#3178c6', 'tsx': '#3b82f6',
 				'py': '#3776ab', 'rb': '#cc342d', 'go': '#00add8', 'rs': '#ce422b',
-				'java': '#ed8b00', 'cpp': '#00599c', 'c': '#00599c', 'cs': '#239120',
-				'php': '#777bb4', 'swift': '#fa7343', 'kt': '#7f52ff', 'scala': '#dc322f',
-				'clj': '#5881d8', 'hs': '#5d4f85',
+				'java': '#ed8b00', 'cpp': '#00599c', 'c': '#a8b9cc', 'cs': '#239120',
+				'php': '#777bb4', 'swift': '#fa7343', 'kt': '#7f52ff',
 				
 				// Web files
-				'html': '#e34f26', 'htm': '#e34f26', 'xml': '#ff6600', 'svg': '#ff6600',
+				'html': '#e34f26', 'htm': '#e34f26', 'xml': '#ff6600', 'svg': '#ff9800',
 				'css': '#1572b6', 'scss': '#cf649a', 'sass': '#cf649a', 'less': '#1d365d',
 				
 				// Data files
-				'json': '#000000', 'yaml': '#cb171e', 'yml': '#cb171e', 'toml': '#9c4221',
-				'md': '#083fa1', 'markdown': '#083fa1', 'rst': '#14a085',
+				'json': '#fbbf24', 'yaml': '#cb171e', 'yml': '#cb171e', 'toml': '#9c4221',
+				'md': '#519aba', 'markdown': '#519aba',
 				
-				// Scripts
-				'sql': '#336791', 'sh': '#4eaa25', 'bash': '#4eaa25', 'zsh': '#4eaa25',
-				'fish': '#4eaa25', 'ps1': '#012456',
-				
-				// Config files
-				'dockerfile': '#2496ed', 'makefile': '#427819', 'cmake': '#064f8c',
-				'ini': '#1f1f1f', 'conf': '#1f1f1f', 'cfg': '#1f1f1f', 'properties': '#1f1f1f',
+				// Scripts & configs
+				'sql': '#336791', 'sh': '#4eaa25', 'bash': '#4eaa25',
+				'dockerfile': '#2496ed', 'gitignore': '#f05032',
 				
 				// Other
-				'log': '#666666', 'txt': '#666666', 'text': '#666666'
+				'log': '#9ca3af', 'txt': '#9ca3af'
 			};
 			
-			const color = iconColors[ext] || '#8aa2c4';
+			const color = iconColors[ext] || '#94a3b8';
 			
-			// Different icons for different file types
-			if (['js', 'jsx', 'ts', 'tsx', 'py', 'rb', 'go', 'rs', 'java', 'cpp', 'c', 'cs', 'php', 'swift', 'kt', 'scala', 'clj', 'hs'].includes(ext)) {
-				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
-			} else if (['html', 'htm', 'xml', 'svg'].includes(ext)) {
-				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
-			} else if (['css', 'scss', 'sass', 'less'].includes(ext)) {
-				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
-			} else if (['json', 'yaml', 'yml', 'toml'].includes(ext)) {
-				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
-			} else if (['md', 'markdown', 'rst'].includes(ext)) {
-				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
-			} else if (['sql', 'sh', 'bash', 'zsh', 'fish', 'ps1'].includes(ext)) {
-				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
-			} else {
-				return `<svg width="14" height="14" viewBox="0 0 24 24" fill="${color}"><path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/></svg>`;
-			}
+			// Modern file icon with outline and colored fill
+			return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+				<path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z" fill="${color}" opacity="0.15"/>
+				<path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z" stroke="${color}" stroke-width="1.5"/>
+				<path d="M14 2v6h6" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+			</svg>`;
 		}
 
 		function renderNode(node) {
