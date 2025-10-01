@@ -1654,7 +1654,7 @@ document.addEventListener('DOMContentLoaded', () => {
 					el.classList.add('has-children');
 					// Add caret icon at the end (right side)
 					caret = document.createElement('span');
-					caret.className = 'caret';
+					caret.className = 'caret open'; // Add 'open' class by default
 					caret.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
 					el.appendChild(caret);
 				}
@@ -1672,6 +1672,14 @@ document.addEventListener('DOMContentLoaded', () => {
 						e.stopPropagation();
 						const collapsed = el.classList.toggle('collapsed');
 						children.style.display = collapsed ? 'none' : 'block';
+						// Toggle caret icon
+						if (caret) {
+							if (collapsed) {
+								caret.classList.remove('open');
+							} else {
+								caret.classList.add('open');
+							}
+						}
 						selectedDirectoryPath = node.path;
 						highlightSelectedDir(el);
 					};
