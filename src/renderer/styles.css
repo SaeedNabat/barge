@@ -216,22 +216,24 @@ body.theme-light .topbar {
 .breadcrumb {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	font-size: 12px;
+	gap: 4px;
+	font-size: 11px;
 	color: #94a3b8;
 	overflow: hidden;
 	white-space: nowrap;
 	flex-shrink: 1;
 	min-width: 0;
+	max-width: 400px;
+	margin-right: 12px;
 }
 
 .breadcrumb-item {
 	display: inline-flex;
 	align-items: center;
-	gap: 6px;
+	gap: 4px;
 	cursor: pointer;
-	padding: 4px 8px;
-	border-radius: 4px;
+	padding: 2px 6px;
+	border-radius: 3px;
 	transition: background var(--dur-short) var(--ease-standard), color var(--dur-short) var(--ease-standard);
 }
 
