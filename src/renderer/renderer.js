@@ -568,19 +568,20 @@ function updateEmptyState() {
 	const sidebarWelcome = document.getElementById('sidebarWelcome');
 	const hasAny = openTabs.length > 0 || !!currentWorkspaceRoot;
 	modal?.classList.add('hidden');
-	if (sidebarWelcome) sidebarWelcome.style.display = hasAny ? 'none' : 'block';
+	
+	// Show sidebar welcome buttons when no workspace is open
+	if (sidebarWelcome) {
+		sidebarWelcome.style.display = currentWorkspaceRoot ? 'none' : 'block';
+	}
+	
 	// Also update editor enabled state whenever empty state changes
 	updateEditorEnabled();
+	
 	// Toggle file tree filter visibility based on folder presence
 	const fileTreeFilterWrap = document.querySelector('.file-tree-filter');
 	if (fileTreeFilterWrap) {
 		if (currentWorkspaceRoot) {
 			fileTreeFilterWrap.style.display = 'block';
-					// Hide sidebar welcome open buttons when a folder is open
-					try {
-						const sw = document.getElementById('sidebarWelcome');
-						if (sw) sw.style.display = 'none';
-					} catch {}
 		} else {
 			fileTreeFilterWrap.style.display = 'none';
 			const inp = document.getElementById('fileTreeFilter');
