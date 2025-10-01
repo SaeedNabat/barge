@@ -68,9 +68,6 @@
 						<button class="menu-item" id="mViewToggleSidebar"><span>Toggle Sidebar</span><kbd>Ctrl+B</kbd></button>
 						<button class="menu-item" id="mViewSplit"><span>Split Editor</span></button>
 						<button class="menu-item" id="mViewUnsplit"><span>Unsplit Editor</span></button>
-						<div class="menu-item" style="pointer-events:none; opacity:.8;">Theme</div>
-						<button class="menu-item" id="mThemeDark"><span>Dark</span></button>
-						<button class="menu-item" id="mThemeLight"><span>Light</span></button>
 						<div class="menu-sep"></div>
 						<button class="menu-item" id="mViewToggleStatus"><span>Toggle Status Bar</span></button>
 						<button class="menu-item" id="mViewToggleWordWrap"><span>Toggle Word Wrap</span><kbd>Alt+Z</kbd></button>
@@ -206,6 +203,16 @@
 				</div>
 				<div class="modal-body">
 					<label class="field">
+						<span>Theme</span>
+						<select id="prefTheme">
+							<option value="dark">Dark</option>
+							<option value="light">Light</option>
+							<option value="dracula">Dracula</option>
+							<option value="nord">Nord</option>
+							<option value="monokai">Monokai</option>
+						</select>
+					</label>
+					<label class="field">
 						<span>Editor font family</span>
 						<input id="prefFontFamily" type="text" placeholder="e.g. JetBrains Mono, Fira Code, monospace" />
 					</label>
@@ -232,6 +239,14 @@
 					<label class="field">
 						<span>Format on save</span>
 						<input id="prefFormatOnSave" type="checkbox" />
+					</label>
+					<label class="field">
+						<span>Font ligatures</span>
+						<input id="prefFontLigatures" type="checkbox" />
+					</label>
+					<label class="field">
+						<span>Compact mode</span>
+						<input id="prefCompactMode" type="checkbox" />
 					</label>
 					<div class="field">
 						<span>Cursor Blink Rate <small id="prefCursorBlinkVal" style="opacity:.8;margin-left:6px;">1200 ms</small></span>

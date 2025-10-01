@@ -1095,6 +1095,17 @@ body.zen .titlebar, body.zen .menubar, body.zen .statusbar, body.zen .sidebar { 
 body.zen .app { grid-template-columns: 0 1fr; }
 body.zen #editor { height: calc(100vh); }
 
+/* Compact mode - reduced padding and spacing */
+body.compact-mode .titlebar { height: 28px; }
+body.compact-mode .menubar { height: 28px; padding: 0 6px; gap: 8px; }
+body.compact-mode .topbar { height: 40px; padding: 0 6px; }
+body.compact-mode .statusbar { height: 20px; padding: 0 8px; font-size: 11px; }
+body.compact-mode .sidebar { padding: 4px; }
+body.compact-mode .sidebar-header { padding: 6px 8px; }
+body.compact-mode .file-tree-filter { padding: 4px 4px 6px; }
+body.compact-mode .tab { height: 32px; padding: 0 10px; }
+body.compact-mode .main { grid-template-rows: 40px 1fr auto 20px; }
+
 /* Beautiful Cursor Effects */
 .monaco-editor .cursor {
 	animation: cursorPulse var(--cursor-blink-duration, 1.2s) ease-in-out infinite;

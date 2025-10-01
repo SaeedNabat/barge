@@ -290,7 +290,7 @@ window.deleteFlow = deleteFlow;
 const settings = {
 	fontFamily: 'JetBrains Mono, Fira Code, Menlo, Consolas, "Liberation Mono", monospace',
 	fontSize: 14,
-	theme: 'dark',
+	theme: 'dark', // dark | light | dracula | nord | monokai
 	autoSave: 'off', // off | afterDelay | onFocusChange
 	autoSaveDelay: 1000,
 	formatOnSave: false, // Format document on save
@@ -300,6 +300,8 @@ const settings = {
 	cursorBlinkMs: 1200,
 	statusBarVisible: true,
 	tabSize: 4, // Number of spaces per tab
+	fontLigatures: true, // Enable font ligatures
+	compactMode: false, // Compact UI for smaller screens
 };
 
 function loadSettings() {
@@ -440,14 +442,40 @@ function updateBreadcrumb(filePath) {
 
 function applySettings() {
 	if (!editor || !monacoRef) return;
-	editor.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize });
-		monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
+	
+	// Get Monaco theme name
+	const getMonacoTheme = (themeName) => {
+		const themeMap = {
+			'light': 'barge-light',
+			'dark': 'barge-dark',
+			'dracula': 'dracula',
+			'nord': 'nord',
+			'monokai': 'monokai'
+		};
+		return themeMap[themeName] || 'barge-dark';
+	};
+	
+	editor.updateOptions({ 
+		fontFamily: settings.fontFamily, 
+		fontSize: settings.fontSize,
+		fontLigatures: settings.fontLigatures 
+	});
+	monacoRef.editor.setTheme(getMonacoTheme(settings.theme));
 	document.body.classList.toggle('theme-light', settings.theme === 'light');
+	document.body.classList.toggle('compact-mode', settings.compactMode);
 	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace, tabSize: settings.tabSize });
-		if (editor2Instance) {
-			editor2Instance.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize, wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace, tabSize: settings.tabSize });
-			monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
-		}
+	if (editor2Instance) {
+		editor2Instance.updateOptions({ 
+			fontFamily: settings.fontFamily, 
+			fontSize: settings.fontSize, 
+			fontLigatures: settings.fontLigatures,
+			wordWrap: settings.wordWrap, 
+			lineNumbers: settings.lineNumbers, 
+			renderWhitespace: settings.renderWhitespace, 
+			tabSize: settings.tabSize 
+		});
+		monacoRef.editor.setTheme(getMonacoTheme(settings.theme));
+	}
 		// Update tab size display in status bar
 		updateTabSizeDisplay();
 		
@@ -693,8 +721,6 @@ window.addEventListener('DOMContentLoaded', () => {
 	const mEditPreferences = document.getElementById('mEditPreferences');
 	const mEditUndo = document.getElementById('mEditUndo');
 	const mEditRedo = document.getElementById('mEditRedo');
-	const mThemeDark = document.getElementById('mThemeDark');
-	const mThemeLight = document.getElementById('mThemeLight');
 const mViewToggleSidebar = document.getElementById('mViewToggleSidebar');
 const mViewFullScreen = document.getElementById('mViewFullScreen');
 const mViewZenMode = document.getElementById('mViewZenMode');
@@ -704,6 +730,7 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const toggleMinimapBtn = document.getElementById('toggleMinimap');
 	const mViewToggleWordWrap = document.getElementById('mViewToggleWordWrap');
 	const mViewToggleLineNumbers = document.getElementById('mViewToggleLineNumbers');
+	const prefTheme = document.getElementById('prefTheme');
 	const prefFontFamily = document.getElementById('prefFontFamily');
 	const prefFontSize = document.getElementById('prefFontSize');
 	const prefTabSize = document.getElementById('prefTabSize');
@@ -716,6 +743,8 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const prefCursorBlink = document.getElementById('prefCursorBlink');
 	const prefCursorBlinkVal = document.getElementById('prefCursorBlinkVal');
 	const prefFormatOnSave = document.getElementById('prefFormatOnSave');
+	const prefFontLigatures = document.getElementById('prefFontLigatures');
+	const prefCompactMode = document.getElementById('prefCompactMode');
 
 	const mFileNew = document.getElementById('mFileNew');
 	const newFileBtn = document.getElementById('sidebarNewFile');
@@ -884,12 +913,11 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	safeBind(mEditUndo, 'click', () => { editor?.trigger('menu', 'undo', null); });
 	safeBind(mEditRedo, 'click', () => { editor?.trigger('menu', 'redo', null); });
 	safeBind(mEditPreferences, 'click', () => { if (typeof openPrefs === 'function') openPrefs(); else setTimeout(() => openPrefs?.(), 100); });
-	safeBind(mThemeDark, 'click', () => { settings.theme = 'dark'; saveSettings(); applySettings(); });
-	safeBind(mThemeLight, 'click', () => { settings.theme = 'light'; saveSettings(); applySettings(); });
 	safeBind(mViewToggleStatus, 'click', () => { settings.statusBarVisible = !settings.statusBarVisible; saveSettings(); applySettings(); });
  safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.classList.toggle('sidebar-hidden'); saveSettings(); });
 
 	function openPrefs() {
+		if (prefTheme) prefTheme.value = settings.theme || 'dark';
 		prefFontFamily.value = settings.fontFamily;
 		prefFontSize.value = settings.fontSize;
 		if (prefTabSize) {
@@ -899,6 +927,8 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		prefAutoSave.value = settings.autoSave;
 		prefAutoSaveDelay.value = settings.autoSaveDelay;
 		if (prefFormatOnSave) prefFormatOnSave.checked = settings.formatOnSave || false;
+		if (prefFontLigatures) prefFontLigatures.checked = settings.fontLigatures !== false;
+		if (prefCompactMode) prefCompactMode.checked = settings.compactMode || false;
 		if (prefCursorBlink) {
 			const val = Math.max(300, Math.min(3000, parseInt(settings.cursorBlinkMs || 1200, 10)));
 			prefCursorBlink.value = String(val);
@@ -918,12 +948,15 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	}
 	safeBind(prefAutoSave, 'change', () => { autoSaveDelayField.style.display = prefAutoSave.value === 'afterDelay' ? 'grid' : 'none'; });
 	safeBind(prefsSave, 'click', () => {
+		if (prefTheme) settings.theme = prefTheme.value;
 		settings.fontFamily = prefFontFamily.value || settings.fontFamily;
 		settings.fontSize = Math.max(8, Math.min(48, parseInt(prefFontSize.value || settings.fontSize, 10)));
 		if (prefTabSize && prefTabSize.value) settings.tabSize = Math.max(1, Math.min(16, parseInt(prefTabSize.value, 10)));
 		settings.autoSave = prefAutoSave.value;
 		settings.autoSaveDelay = Math.max(100, Math.min(10000, parseInt(prefAutoSaveDelay.value || settings.autoSaveDelay, 10)));
 		if (prefFormatOnSave) settings.formatOnSave = prefFormatOnSave.checked;
+		if (prefFontLigatures) settings.fontLigatures = prefFontLigatures.checked;
+		if (prefCompactMode) settings.compactMode = prefCompactMode.checked;
 		if (prefCursorBlink && prefCursorBlink.value) settings.cursorBlinkMs = Math.max(300, Math.min(3000, parseInt(prefCursorBlink.value, 10)));
 		saveSettings();
 		applySettings();
@@ -2554,12 +2587,112 @@ document.addEventListener('DOMContentLoaded', () => {
 					}
 				});
 
+				// Dracula theme
+				monacoRef.editor.defineTheme('dracula', {
+					base: 'vs-dark',
+					inherit: true,
+					rules: [
+						{ token: 'comment', foreground: '6272a4', fontStyle: 'italic' },
+						{ token: 'keyword', foreground: 'ff79c6', fontStyle: 'bold' },
+						{ token: 'string', foreground: 'f1fa8c' },
+						{ token: 'number', foreground: 'bd93f9' },
+						{ token: 'regexp', foreground: 'ffb86c' },
+						{ token: 'type', foreground: '8be9fd' },
+						{ token: 'class', foreground: '8be9fd' },
+						{ token: 'function', foreground: '50fa7b' },
+						{ token: 'variable', foreground: 'f8f8f2' },
+						{ token: 'constant', foreground: 'bd93f9' },
+						{ token: 'operator', foreground: 'ff79c6' },
+						{ token: 'tag', foreground: 'ff79c6' },
+					],
+					colors: {
+						'editor.background': '#282a36',
+						'editor.foreground': '#f8f8f2',
+						'editor.lineHighlightBackground': '#44475a',
+						'editor.selectionBackground': '#44475a',
+						'editorCursor.foreground': '#f8f8f0',
+						'editorWhitespace.foreground': '#44475a',
+						'editorLineNumber.foreground': '#6272a4',
+					}
+				});
+
+				// Nord theme
+				monacoRef.editor.defineTheme('nord', {
+					base: 'vs-dark',
+					inherit: true,
+					rules: [
+						{ token: 'comment', foreground: '616e88', fontStyle: 'italic' },
+						{ token: 'keyword', foreground: '81a1c1', fontStyle: 'bold' },
+						{ token: 'string', foreground: 'a3be8c' },
+						{ token: 'number', foreground: 'b48ead' },
+						{ token: 'regexp', foreground: 'ebcb8b' },
+						{ token: 'type', foreground: '8fbcbb' },
+						{ token: 'class', foreground: '8fbcbb' },
+						{ token: 'function', foreground: '88c0d0' },
+						{ token: 'variable', foreground: 'd8dee9' },
+						{ token: 'constant', foreground: 'b48ead' },
+						{ token: 'operator', foreground: '81a1c1' },
+						{ token: 'tag', foreground: '81a1c1' },
+					],
+					colors: {
+						'editor.background': '#2e3440',
+						'editor.foreground': '#d8dee9',
+						'editor.lineHighlightBackground': '#3b4252',
+						'editor.selectionBackground': '#434c5e',
+						'editorCursor.foreground': '#d8dee9',
+						'editorWhitespace.foreground': '#434c5e',
+						'editorLineNumber.foreground': '#4c566a',
+					}
+				});
+
+				// Monokai theme
+				monacoRef.editor.defineTheme('monokai', {
+					base: 'vs-dark',
+					inherit: true,
+					rules: [
+						{ token: 'comment', foreground: '75715e', fontStyle: 'italic' },
+						{ token: 'keyword', foreground: 'f92672', fontStyle: 'bold' },
+						{ token: 'string', foreground: 'e6db74' },
+						{ token: 'number', foreground: 'ae81ff' },
+						{ token: 'regexp', foreground: 'fd971f' },
+						{ token: 'type', foreground: '66d9ef' },
+						{ token: 'class', foreground: 'a6e22e' },
+						{ token: 'function', foreground: 'a6e22e' },
+						{ token: 'variable', foreground: 'f8f8f2' },
+						{ token: 'constant', foreground: 'ae81ff' },
+						{ token: 'operator', foreground: 'f92672' },
+						{ token: 'tag', foreground: 'f92672' },
+					],
+					colors: {
+						'editor.background': '#272822',
+						'editor.foreground': '#f8f8f2',
+						'editor.lineHighlightBackground': '#3e3d32',
+						'editor.selectionBackground': '#49483e',
+						'editorCursor.foreground': '#f8f8f0',
+						'editorWhitespace.foreground': '#3b3a32',
+						'editorLineNumber.foreground': '#90908a',
+					}
+				});
+
 			// Create Monaco editor
+			// Get theme name
+			function getMonacoTheme(themeName) {
+				const themeMap = {
+					'light': 'barge-light',
+					'dark': 'barge-dark',
+					'dracula': 'dracula',
+					'nord': 'nord',
+					'monokai': 'monokai'
+				};
+				return themeMap[themeName] || 'barge-dark';
+			}
+			
 			editor = monacoRef.editor.create(editorContainer, {
 				value: '// Welcome to Barge Editor\n',
 				language: 'javascript',
-				theme: settings.theme === 'light' ? 'barge-light' : 'barge-dark',
+				theme: getMonacoTheme(settings.theme),
 				automaticLayout: true,
+				fontLigatures: settings.fontLigatures,
 				cursorBlinking: "smooth",
 				cursorSmoothCaretAnimation: "on",
 				cursorStyle: "line",
@@ -3089,16 +3222,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function updateViewMenuState() {
 	try {
-		const dark = document.getElementById('mThemeDark');
-		const light = document.getElementById('mThemeLight');
 		const statusBtn = document.getElementById('mViewToggleStatus');
 		const ww = document.getElementById('mViewToggleWordWrap');
 		const ln = document.getElementById('mViewToggleLineNumbers');
-		// Theme
-		dark?.classList.toggle('active', settings.theme === 'dark');
-		light?.classList.toggle('active', settings.theme === 'light');
-		dark?.setAttribute('aria-checked', String(settings.theme === 'dark'));
-		light?.setAttribute('aria-checked', String(settings.theme === 'light'));
 		// Status bar
 		const sbVisible = !!settings.statusBarVisible;
 		statusBtn?.classList.toggle('active', sbVisible);
