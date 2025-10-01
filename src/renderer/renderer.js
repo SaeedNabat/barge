@@ -1064,11 +1064,19 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 	safeBind(collapseAllBtn, 'click', () => {
 		const fileTree = document.getElementById('fileTree');
 		if (!fileTree) return;
+		
 		// Collapse all folders
 		const allChildren = fileTree.querySelectorAll('.children');
 		allChildren.forEach(children => {
 			children.style.display = 'none';
 		});
+		
+		// Set all folder items to collapsed state
+		const allFolderItems = fileTree.querySelectorAll('.item.has-children');
+		allFolderItems.forEach(item => {
+			item.classList.add('collapsed');
+		});
+		
 		// Reset all carets to collapsed state
 		const allCarets = fileTree.querySelectorAll('.caret');
 		allCarets.forEach(caret => {
