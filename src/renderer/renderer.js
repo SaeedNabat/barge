@@ -306,7 +306,9 @@ const settings = {
 
 function loadSettings() {
 	try { const raw = localStorage.getItem('barge:settings'); if (raw) Object.assign(settings, JSON.parse(raw)); } catch {}
-	document.body.classList.toggle('theme-light', settings.theme === 'light');
+	// Apply theme class to body
+	document.body.classList.remove('theme-light', 'theme-dark', 'theme-dracula', 'theme-nord', 'theme-monokai');
+	document.body.classList.add(`theme-${settings.theme || 'dark'}`);
 }
 
 function saveSettings() { localStorage.setItem('barge:settings', JSON.stringify(settings)); }
@@ -461,7 +463,10 @@ function applySettings() {
 		fontLigatures: settings.fontLigatures 
 	});
 	monacoRef.editor.setTheme(getMonacoTheme(settings.theme));
-	document.body.classList.toggle('theme-light', settings.theme === 'light');
+	
+	// Apply theme class to body
+	document.body.classList.remove('theme-light', 'theme-dark', 'theme-dracula', 'theme-nord', 'theme-monokai');
+	document.body.classList.add(`theme-${settings.theme || 'dark'}`);
 	document.body.classList.toggle('compact-mode', settings.compactMode);
 	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace, tabSize: settings.tabSize });
 	if (editor2Instance) {

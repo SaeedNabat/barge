@@ -1106,6 +1106,93 @@ body.compact-mode .file-tree-filter { padding: 4px 4px 6px; }
 body.compact-mode .tab { height: 32px; padding: 0 10px; }
 body.compact-mode .main { grid-template-rows: 40px 1fr auto 20px; }
 
+/* Dracula Theme UI */
+body.theme-dracula {
+	--bg-primary: #282a36;
+	--bg-secondary: #21222c;
+	--bg-tertiary: #191a21;
+	--text-primary: #f8f8f2;
+	--text-secondary: #6272a4;
+	--border-color: #44475a;
+	--accent-color: #bd93f9;
+	--accent-hover: #ff79c6;
+}
+
+body.theme-dracula .titlebar,
+body.theme-dracula .menubar,
+body.theme-dracula .sidebar,
+body.theme-dracula .topbar,
+body.theme-dracula .statusbar {
+	background: var(--bg-secondary);
+	border-color: var(--border-color);
+	color: var(--text-primary);
+}
+
+body.theme-dracula .sidebar { background: var(--bg-tertiary); }
+body.theme-dracula .file-tree .item:hover { background: rgba(189, 147, 249, 0.1); }
+body.theme-dracula .tab { background: var(--bg-tertiary); border-color: var(--border-color); }
+body.theme-dracula .tab.active { background: var(--bg-primary); border-bottom-color: var(--accent-color); }
+body.theme-dracula .menu-item:hover { background: rgba(189, 147, 249, 0.15); }
+body.theme-dracula .breadcrumb-item:hover { background: rgba(189, 147, 249, 0.15); }
+
+/* Nord Theme UI */
+body.theme-nord {
+	--bg-primary: #2e3440;
+	--bg-secondary: #3b4252;
+	--bg-tertiary: #2e3440;
+	--text-primary: #d8dee9;
+	--text-secondary: #616e88;
+	--border-color: #434c5e;
+	--accent-color: #88c0d0;
+	--accent-hover: #81a1c1;
+}
+
+body.theme-nord .titlebar,
+body.theme-nord .menubar,
+body.theme-nord .sidebar,
+body.theme-nord .topbar,
+body.theme-nord .statusbar {
+	background: var(--bg-secondary);
+	border-color: var(--border-color);
+	color: var(--text-primary);
+}
+
+body.theme-nord .sidebar { background: var(--bg-tertiary); }
+body.theme-nord .file-tree .item:hover { background: rgba(136, 192, 208, 0.1); }
+body.theme-nord .tab { background: var(--bg-tertiary); border-color: var(--border-color); }
+body.theme-nord .tab.active { background: var(--bg-primary); border-bottom-color: var(--accent-color); }
+body.theme-nord .menu-item:hover { background: rgba(136, 192, 208, 0.15); }
+body.theme-nord .breadcrumb-item:hover { background: rgba(136, 192, 208, 0.15); }
+
+/* Monokai Theme UI */
+body.theme-monokai {
+	--bg-primary: #272822;
+	--bg-secondary: #1e1f1c;
+	--bg-tertiary: #1a1b17;
+	--text-primary: #f8f8f2;
+	--text-secondary: #75715e;
+	--border-color: #3e3d32;
+	--accent-color: #a6e22e;
+	--accent-hover: #66d9ef;
+}
+
+body.theme-monokai .titlebar,
+body.theme-monokai .menubar,
+body.theme-monokai .sidebar,
+body.theme-monokai .topbar,
+body.theme-monokai .statusbar {
+	background: var(--bg-secondary);
+	border-color: var(--border-color);
+	color: var(--text-primary);
+}
+
+body.theme-monokai .sidebar { background: var(--bg-tertiary); }
+body.theme-monokai .file-tree .item:hover { background: rgba(166, 226, 46, 0.1); }
+body.theme-monokai .tab { background: var(--bg-tertiary); border-color: var(--border-color); }
+body.theme-monokai .tab.active { background: var(--bg-primary); border-bottom-color: var(--accent-color); }
+body.theme-monokai .menu-item:hover { background: rgba(166, 226, 46, 0.15); }
+body.theme-monokai .breadcrumb-item:hover { background: rgba(166, 226, 46, 0.15); }
+
 /* Beautiful Cursor Effects */
 .monaco-editor .cursor {
 	animation: cursorPulse var(--cursor-blink-duration, 1.2s) ease-in-out infinite;
