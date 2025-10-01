@@ -62,22 +62,58 @@ function fadeIn(win, durationMs = 220, target = 1) {
     });
 }
 
-// Read immediate children (lazy) of a directory
-ipcMain.handle('folder:readChildren', async (_evt, { dir }) => {
+// Read immediate children (lazy) of a directory, with options
+// Options: { dir, includeDotfiles=false, limit=1000, withStats=false }
+ipcMain.handle('folder:readChildren', async (_evt, payload) => {
     try {
+        const { dir, includeDotfiles = false, limit = 1000, withStats = false } = payload || {};
         if (!dir) return { ok: false, error: 'Missing dir' };
+
+        // Read entries and build up to `limit` results
         const entries = await fs.readdir(dir, { withFileTypes: true });
-        const items = await Promise.all(entries.map(async (ent) => {
-            const fullPath = path.join(dir, ent.name);
-            if (ent.isDirectory()) return { type: 'dir', name: ent.name, path: fullPath };
-            if (ent.isFile()) return { type: 'file', name: ent.name, path: fullPath };
-            return null;
-        }));
-        const children = items.filter(Boolean).sort((a, b) => {
+        const out = [];
+        for (const ent of entries) {
+            const name = ent.name;
+            if (!includeDotfiles && name.startsWith('.')) continue;
+            const fullPath = path.join(dir, name);
+            if (ent.isDirectory()) {
+                // Determine if directory appears to have children (respect includeDotfiles)
+                let hasChildren = false;
+                try {
+                    const dh = await fs.opendir(fullPath);
+                    try {
+                        for await (const d of dh) {
+                            if (!includeDotfiles && d.name.startsWith('.')) { continue; }
+                            // Count any file or directory as a child; skip other types
+                            if (d.isDirectory() || d.isFile()) { hasChildren = true; break; }
+                        }
+                    } finally { try { await dh.close(); } catch {} }
+                } catch {}
+                out.push({ type: 'dir', name, path: fullPath, hasChildren });
+            } else if (ent.isFile()) {
+                if (withStats) {
+                    try {
+                        const st = await fs.stat(fullPath);
+                        out.push({ type: 'file', name, path: fullPath, size: st.size, mtimeMs: st.mtimeMs });
+                    } catch {
+                        out.push({ type: 'file', name, path: fullPath });
+                    }
+                } else {
+                    out.push({ type: 'file', name, path: fullPath });
+                }
+            } else {
+                // skip other types (symlinks, sockets, etc.) for now
+            }
+            if (out.length >= Math.max(1, Math.min(10000, Number(limit) || 1000))) break;
+        }
+
+        // Sort: directories first, then files, alphabetical by name
+        out.sort((a, b) => {
             if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
             return a.name.localeCompare(b.name);
         });
-        return { ok: true, dir, children };
+
+        return { ok: true, dir, children: out };
     } catch (e) {
         return { ok: false, error: String(e) };
     }
@@ -184,6 +220,43 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
 	if (BrowserWindow.getAllWindows().length === 0) createWindow();
+});
+
+// Provide app logo as data URL so renderer can display it reliably in dev/prod
+ipcMain.handle('app:getLogo', async () => {
+    try {
+        // 1) Try source asset for dev runs
+        const srcLogoPath = path.join(__dirname, 'assets', 'barge.png');
+        try {
+            await fs.access(srcLogoPath);
+            const buf = await fs.readFile(srcLogoPath);
+            return { ok: true, dataUrl: `data:image/png;base64,${buf.toString('base64')}` };
+        } catch {}
+
+        // 2) Fallback: Vite dist hashed asset e.g. dist/assets/barge-<hash>.png
+        try {
+            const distAssetsDir = path.join(__dirname, '..', 'dist', 'assets');
+            const files = await fs.readdir(distAssetsDir);
+            // Prefer <appName>-*.png, then any *<appName>*.png, else any .png
+            const appName = (app.getName && typeof app.getName === 'function') ? app.getName() : 'barge';
+            const esc = appName.replace(/[-/\\^$*+?.()|[\]{}]/g, r => `\\${r}`);
+            const reStrict = new RegExp(`^(${esc})[-\\.].*\\.png$`, 'i');
+            const reLoose = new RegExp(`${esc}.*\\.png$`, 'i');
+            const pngs = files.filter(f => /\.png$/i.test(f));
+            const strict = pngs.filter(f => reStrict.test(f));
+            const loose = strict.length ? strict : pngs.filter(f => reLoose.test(f));
+            const pick = (loose.length ? loose : pngs).sort()[0] || null;
+            if (pick) {
+                const p = path.join(distAssetsDir, pick);
+                const buf = await fs.readFile(p);
+                return { ok: true, dataUrl: `data:image/png;base64,${buf.toString('base64')}` };
+            }
+        } catch {}
+
+        return { ok: false, error: 'logo not found' };
+    } catch (e) {
+        return { ok: false, error: String(e) };
+    }
 });
 
 // Renderer signals it's fully ready to be shown

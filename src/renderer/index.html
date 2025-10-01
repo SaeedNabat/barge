@@ -38,6 +38,7 @@
 						<button class="menu-item" id="mFileOpen"><span>Open…</span><kbd>Ctrl+O</kbd></button>
 						<button class="menu-item" id="mFileQuickOpen"><span>Quick Open…</span><kbd>Ctrl+P</kbd></button>
 						<button class="menu-item" id="mFileOpenFolder"><span>Open Folder…</span><kbd>Ctrl+K Ctrl+O</kbd></button>
+						<button class="menu-item" id="mFileCloseFolder"><span>Close Folder</span></button>
 						<button class="menu-item" id="mFileSave"><span>Save</span><kbd>Ctrl+S</kbd></button>
 						<button class="menu-item" id="mFileSaveAll"><span>Save All</span></button>
 						<button class="menu-item" id="mFileSaveAs"><span>Save As…</span><kbd>Ctrl+Shift+S</kbd></button>
@@ -91,33 +92,37 @@
 				<aside class="sidebar">
 					<div class="sidebar-toolbar">
 						<button id="sidebarNewFile" title="New File" class="icon-btn accent" aria-label="New File">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="#60a5fa">
-								<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/>
-								<path d="M14 2v7h7"/>
-								<path d="M12 11v6M9 14h6"/>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<path d="M14 2H8a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8z"/>
+								<path d="M14 2v6h6"/>
+								<path d="M12 11v6"/>
+								<path d="M9 14h6"/>
 							</svg>
 						</button>
 						<button id="sidebarNewFolder" title="New Folder" class="icon-btn" aria-label="New Folder">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="#34d399">
-								<path d="M3 7h5l2 2h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-								<path d="M12 13v6M9 16h6"/>
+							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+								<path d="M3 7h5l2 2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+								<path d="M12 13v6"/>
+								<path d="M9 16h6"/>
 							</svg>
 						</button>
 					</div>
 					<div id="sidebarWelcome" class="sidebar-welcome" style="display:none">
-						<button id="sidebarOpenFile" class="sidebar-welcome-btn">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/>
-								<path d="M14 2v7h7"/>
-							</svg>
-							Open File
-						</button>
-						<button id="sidebarOpenFolder" class="sidebar-welcome-btn">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-								<path d="M3 7h5l2 2h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-							</svg>
-							Open Folder
-						</button>
+						<div class="sidebar-welcome-buttons">
+							<button id="sidebarOpenFile" class="sidebar-welcome-btn">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/>
+									<path d="M14 2v7h7"/>
+								</svg>
+								Open File
+							</button>
+							<button id="sidebarOpenFolder" class="sidebar-welcome-btn">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<path d="M3 7h5l2 2h9a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+								</svg>
+								Open Folder
+							</button>
+						</div>
 					</div>
 					<div class="file-tree-filter">
 						<input id="fileTreeFilter" type="text" placeholder="Filter files (filename contains…)" />
@@ -149,12 +154,14 @@
 						<div class="terminal-header">
 							<div id="terminalTabs" class="terminal-tabs"></div>
 							<button id="terminalNew" class="terminal-new" title="New Terminal">+</button>
+							<button id="terminalClosePanel" class="terminal-close" title="Close Terminal Panel">×</button>
 						</div>
 						<div id="terminalViews" class="terminal-views"></div>
 					</div>
 					<footer class="statusbar">
 						<span id="cursorPos">Ln 1, Col 1</span>
 						<span id="lang">plaintext</span>
+						<span id="tabSize" class="tab-size" title="Click to change tab size">Spaces: 4</span>
 						<span id="problemsCount" class="problems-count" aria-live="polite"></span>
 					</footer>
 				</main>
@@ -190,10 +197,10 @@
 						<span>Editor font size</span>
 						<input id="prefFontSize" type="number" min="8" max="48" step="1" />
 					</label>
-					<label class="field">
-						<span>App opacity</span>
-						<input id="prefAppOpacity" type="range" min="0.6" max="1" step="0.02" />
-					</label>
+					<div class="field">
+						<span>Tab Size <small id="prefTabSizeVal" style="opacity:.8;margin-left:6px;">4 spaces</small></span>
+						<input id="prefTabSize" type="range" min="1" max="16" step="1" />
+					</div>
 					<label class="field">
 						<span>Auto save</span>
 						<select id="prefAutoSave">

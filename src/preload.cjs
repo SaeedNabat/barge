@@ -35,7 +35,10 @@ contextBridge.exposeInMainWorld('bridge', {
 	createFolder: async ({ root, name }) => ipcRenderer.invoke('fs:createFolder', { root, name }),
 	createFile: async ({ dir, name }) => ipcRenderer.invoke('fs:createFile', { dir, name }),
 	readFolderTree: async (root) => ipcRenderer.invoke('folder:readTree', { root }),
-	readFolderChildren: async (dir) => ipcRenderer.invoke('folder:readChildren', { dir }),
+	readFolderChildren: async (arg) => {
+		const payload = (typeof arg === 'string' || !arg) ? { dir: arg } : arg;
+		return ipcRenderer.invoke('folder:readChildren', payload);
+	},
 	renamePath: async ({ oldPath, newName }) => ipcRenderer.invoke('fs:renamePath', { oldPath, newName }),
 	deletePath: async ({ target }) => ipcRenderer.invoke('fs:deletePath', { target }),
 	movePath: async ({ sourcePath, targetDir, newName }) => ipcRenderer.invoke('fs:movePath', { sourcePath, targetDir, newName }),
@@ -49,6 +52,7 @@ contextBridge.exposeInMainWorld('bridge', {
 		onExit: (cb) => { const l = (_e, p) => cb(p); ipcRenderer.on('terminal:exit', l); return () => ipcRenderer.removeListener('terminal:exit', l); },
 	},
 	listExtensions: async () => ipcRenderer.invoke('extensions:list'),
+	getLogo: async () => ipcRenderer.invoke('app:getLogo'),
 	registerCommand: (id, fn) => { commands.set(id, fn); },
 	executeCommand: async (id, ...args) => { const fn = commands.get(id); if (fn) return await fn(...args); },
 	window: {

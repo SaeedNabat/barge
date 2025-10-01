@@ -28,6 +28,18 @@ contextBridge.exposeInMainWorld('bridge', {
 	writeFileByPath: async (payload) => ipcRenderer.invoke('file:writeByPath', payload),
 	saveAs: async (content) => ipcRenderer.invoke('file:saveAs', content),
 	searchInFolder: async (payload) => ipcRenderer.invoke('search:inFolder', payload),
+	// File system operations
+	createFolder: async (payload) => ipcRenderer.invoke('fs:createFolder', payload),
+	readFolderTree: async (root) => ipcRenderer.invoke('folder:readTree', { root }),
+	// Accept string path or options object { dir, includeDotfiles, limit, withStats }
+	readFolderChildren: async (arg) => {
+		const payload = (typeof arg === 'string' || !arg) ? { dir: arg } : arg;
+		return ipcRenderer.invoke('folder:readChildren', payload);
+	},
+	createFile: async (payload) => ipcRenderer.invoke('fs:createFile', payload),
+	renamePath: async (payload) => ipcRenderer.invoke('fs:renamePath', payload),
+	movePath: async (payload) => ipcRenderer.invoke('fs:movePath', payload),
+	deletePath: async (payload) => ipcRenderer.invoke('fs:deletePath', payload),
 	terminal: {
 		create: async (cols, rows, cwd) => ipcRenderer.invoke('terminal:create', cols, rows, cwd),
 		write: async (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
@@ -43,17 +55,17 @@ contextBridge.exposeInMainWorld('bridge', {
 		minimize: () => ipcRenderer.invoke('window:minimize'),
 		maximizeToggle: () => ipcRenderer.invoke('window:maximizeToggle'),
 		close: () => ipcRenderer.invoke('window:close'),
+		setOpacity: (value) => ipcRenderer.invoke('window:setOpacity', value),
+		toggleFullScreen: () => ipcRenderer.invoke('window:toggleFullScreen'),
+		newWindow: () => ipcRenderer.invoke('window:new'),
 	},
+	lint: {
+		python: async ({ filePath, content }) => ipcRenderer.invoke('lint:python', { filePath, content }),
+	},
+	appReady: async () => ipcRenderer.invoke('app:renderer-ready'),
 	onFileOpened: (callback) => { fileOpenedListeners.add(callback); return () => fileOpenedListeners.delete(callback); },
 	onFileSaved: (callback) => { fileSavedListeners.add(callback); return () => fileSavedListeners.delete(callback); },
 	onFolderOpened: (callback) => { folderOpenedListeners.add(callback); return () => folderOpenedListeners.delete(callback); },
-	// File system operations
-	createFolder: async (payload) => ipcRenderer.invoke('fs:createFolder', payload),
-	readFolderTree: async (root) => ipcRenderer.invoke('folder:readTree', { root }),
-	createFile: async (payload) => ipcRenderer.invoke('fs:createFile', payload),
-	renamePath: async (payload) => ipcRenderer.invoke('fs:renamePath', payload),
-	movePath: async (payload) => ipcRenderer.invoke('fs:movePath', payload),
-	deletePath: async (payload) => ipcRenderer.invoke('fs:deletePath', payload),
 	revealInOS: async (targetPath) => ipcRenderer.invoke('os:reveal', targetPath),
 	onFsChanged: (callback) => {
 		const listener = (_event, payload) => callback(payload);

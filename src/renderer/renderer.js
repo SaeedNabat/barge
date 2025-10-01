@@ -297,6 +297,7 @@ const settings = {
 	renderWhitespace: 'none', // none | all | selection
 	cursorBlinkMs: 1200,
 	statusBarVisible: true,
+	tabSize: 4, // Number of spaces per tab
 };
 
 function loadSettings() {
@@ -385,21 +386,25 @@ async function restoreSession() {
 	try { window.dispatchEvent(new Event('barge:session-restored')); } catch {}
 }
 
+function updateTabSizeDisplay() {
+	const tabSizeEl = document.getElementById('tabSize');
+	if (tabSizeEl) {
+		tabSizeEl.textContent = `Spaces: ${settings.tabSize}`;
+	}
+}
+
 function applySettings() {
 	if (!editor || !monacoRef) return;
 	editor.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize });
 		monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
 	document.body.classList.toggle('theme-light', settings.theme === 'light');
-	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace });
+	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace, tabSize: settings.tabSize });
 		if (editor2Instance) {
-			editor2Instance.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize, wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace });
+			editor2Instance.updateOptions({ fontFamily: settings.fontFamily, fontSize: settings.fontSize, wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace, tabSize: settings.tabSize });
 			monacoRef.editor.setTheme(settings.theme === 'light' ? 'barge-light' : 'barge-dark');
 		}
-		
-		// Apply app opacity (window-level if available)
-		try { window.bridge?.window?.setOpacity?.(settings.appOpacity || 1); } catch {}
-		const appEl = document.querySelector('.app');
-		if (appEl) appEl.style.opacity = String(settings.appOpacity || 1);
+		// Update tab size display in status bar
+		updateTabSizeDisplay();
 		
 		// Apply cursor blink duration CSS variable (used by custom cursor animation)
 		try { document.documentElement.style.setProperty('--cursor-blink-duration', `${Math.max(300, Math.min(3000, parseInt(settings.cursorBlinkMs || 1200, 10)))}ms`); } catch {}
@@ -528,6 +533,17 @@ function updateEditorEnabled() {
 window.addEventListener('DOMContentLoaded', () => {
 	// Swallow Monaco's expected cancellation rejections
 	try { window.addEventListener('unhandledrejection', (e) => { const r = e?.reason; const msg = (r && (r.message || r.name)) ? (r.message || r.name) : String(r); if (msg && msg.toLowerCase().includes('canceled')) { e.preventDefault?.(); } }); } catch {}
+
+	// Ensure app logo renders correctly across dev/prod by requesting a data URL from main
+	(async () => {
+		try {
+			const res = await window.bridge?.getLogo?.();
+			if (res && res.ok && res.dataUrl) {
+				try { document.querySelectorAll('img.app-logo').forEach(img => { img.src = res.dataUrl; }); } catch {}
+				try { document.querySelectorAll('img.about-logo').forEach(img => { img.src = res.dataUrl; }); } catch {}
+			}
+		} catch {}
+	})();
 	loadSettings();
 	loadRecents();
 
@@ -587,6 +603,19 @@ window.addEventListener('DOMContentLoaded', () => {
 			}
 }
 
+	function closeFolderFlow() {
+		if (!currentWorkspaceRoot) return;
+		// Clear the workspace
+		currentWorkspaceRoot = null;
+		selectedDirectoryPath = null;
+		// Clear the file tree
+		const fileTreeEl = document.getElementById('fileTree');
+		if (fileTreeEl) fileTreeEl.innerHTML = '';
+		// Update UI
+		updateEmptyState();
+		saveSession();
+	}
+
 	document.addEventListener('click', async (e) => {
 		const target = e.target;
 		if (!(target instanceof Element)) return;
@@ -607,6 +636,7 @@ window.addEventListener('DOMContentLoaded', () => {
 	const mFileQuickOpen = document.getElementById('mFileQuickOpen');
 	const mFileOpen = document.getElementById('mFileOpen');
 	const mFileOpenFolder = document.getElementById('mFileOpenFolder');
+	const mFileCloseFolder = document.getElementById('mFileCloseFolder');
 	const mFileSave = document.getElementById('mFileSave');
 	const mFileSaveAll = document.getElementById('mFileSaveAll');
 	const mFileSaveAs = document.getElementById('mFileSaveAs');
@@ -630,7 +660,8 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const mViewToggleLineNumbers = document.getElementById('mViewToggleLineNumbers');
 	const prefFontFamily = document.getElementById('prefFontFamily');
 	const prefFontSize = document.getElementById('prefFontSize');
-	const prefAppOpacity = document.getElementById('prefAppOpacity');
+	const prefTabSize = document.getElementById('prefTabSize');
+	const prefTabSizeVal = document.getElementById('prefTabSizeVal');
 	const prefAutoSave = document.getElementById('prefAutoSave');
 	const prefAutoSaveDelay = document.getElementById('prefAutoSaveDelay');
 	const autoSaveDelayField = document.getElementById('autoSaveDelayField');
@@ -780,6 +811,7 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	safeBind(mFileNewWindow, 'click', () => window.bridge?.window?.newWindow?.());
 	safeBind(mFileOpen, 'click', openFileFlow);
 	safeBind(mFileOpenFolder, 'click', openFolderFlow);
+	safeBind(mFileCloseFolder, 'click', closeFolderFlow);
 	safeBind(mFileSave, 'click', async () => { if (window.__saveActive) { await window.__saveActive(); } else { window.__PENDING_SAVE_ACTIVE__ = true; } });
 	safeBind(mFileSaveAll, 'click', async () => { if (window.__saveAllTabs) { await window.__saveAllTabs(); } else { window.__PENDING_SAVE_ALL__ = true; } });
 	safeBind(mFileCloseAll, 'click', () => { if (window.__closeAllTabs) { window.__closeAllTabs(); } else { window.__PENDING_CLOSE_ALL__ = true; } });
@@ -813,7 +845,10 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	function openPrefs() {
 		prefFontFamily.value = settings.fontFamily;
 		prefFontSize.value = settings.fontSize;
-		if (prefAppOpacity) prefAppOpacity.value = String(settings.appOpacity || 1);
+		if (prefTabSize) {
+			prefTabSize.value = settings.tabSize;
+			if (prefTabSizeVal) prefTabSizeVal.textContent = `${settings.tabSize} spaces`;
+		}
 		prefAutoSave.value = settings.autoSave;
 		prefAutoSaveDelay.value = settings.autoSaveDelay;
 		if (prefCursorBlink) {
@@ -827,6 +862,9 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	function closePrefs() { prefsModal.classList.add('hidden'); }
 
 	safeBind(prefsCancel, 'click', closePrefs);
+	if (prefTabSize) {
+		safeBind(prefTabSize, 'input', () => { if (prefTabSizeVal) prefTabSizeVal.textContent = `${prefTabSize.value} spaces`; });
+	}
 	if (prefCursorBlink) {
 		safeBind(prefCursorBlink, 'input', () => { if (prefCursorBlinkVal) prefCursorBlinkVal.textContent = `${prefCursorBlink.value} ms`; });
 	}
@@ -834,7 +872,7 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	safeBind(prefsSave, 'click', () => {
 		settings.fontFamily = prefFontFamily.value || settings.fontFamily;
 		settings.fontSize = Math.max(8, Math.min(48, parseInt(prefFontSize.value || settings.fontSize, 10)));
-		settings.appOpacity = Math.max(0.6, Math.min(1, parseFloat((prefAppOpacity && prefAppOpacity.value) ? prefAppOpacity.value : String(settings.appOpacity || 1))));
+		if (prefTabSize && prefTabSize.value) settings.tabSize = Math.max(1, Math.min(16, parseInt(prefTabSize.value, 10)));
 		settings.autoSave = prefAutoSave.value;
 		settings.autoSaveDelay = Math.max(100, Math.min(10000, parseInt(prefAutoSaveDelay.value || settings.autoSaveDelay, 10)));
 		if (prefCursorBlink && prefCursorBlink.value) settings.cursorBlinkMs = Math.max(300, Math.min(3000, parseInt(prefCursorBlink.value, 10)));
@@ -930,6 +968,7 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 	const terminalTabs = document.getElementById('terminalTabs');
 	const terminalViews = document.getElementById('terminalViews');
 	const terminalNew = document.getElementById('terminalNew');
+	const terminalClosePanel = document.getElementById('terminalClosePanel');
 
 	// Multi-terminal state
 	let terminals = new Map(); // id -> { instance, viewEl, tabEl }
@@ -1049,6 +1088,9 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 				theme: getTerminalThemeForCurrentSettings()
 			});
 			instance.open(xtermHost);
+			// Reset/clear the terminal viewport and scrollback so it starts clean
+			try { instance.reset?.(); } catch {}
+			try { instance.clear?.(); } catch {}
 		} catch (error) {
 			console.error('✗ Failed to create terminal instance:', error);
 			view.remove();
@@ -1089,15 +1131,9 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 		window.switchTerminal?.(id);
 		console.log('Sending initial commands to terminal:', id);
 
-		// Initial prompt
+		// Ensure dimensions are correct after mount, but do not print any banner
 		setTimeout(() => {
 			window.applyTerminalResizeFor?.(id);
-			if (window.bridge.terminal.write) {
-				window.bridge.terminal.write(id, '\x1b[2J\x1b[H');
-				setTimeout(() => {
-					window.bridge.terminal.write(id, 'echo "Terminal ready!"\r');
-				}, 80);
-			}
 		}, 120);
 
 		return id;
@@ -1127,6 +1163,12 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 	safeBind(terminalNew, 'click', async () => {
 		terminalPanel?.classList.remove('hidden');
 		await window.createTerminal?.();
+	});
+
+	// Close terminal panel button
+	safeBind(terminalClosePanel, 'click', () => {
+		terminalPanel?.classList.add('hidden');
+		updateViewMenuState?.();
 	});
 
 	// Improved terminal loading using AMD loader
@@ -1486,22 +1528,45 @@ document.addEventListener('DOMContentLoaded', () => {
 			el.className = 'item';
 			el.dataset.path = node.path || '';
 			el.dataset.type = node.type || '';
-			el.innerHTML = `${iconSvg(node.type, node.name)} <span>${node.name}</span>`;
+			el.innerHTML = `${iconSvg(node.type, node.name)} <span class="label">${node.name}</span>`;
 			el.draggable = true;
 			if (node.type === 'dir') {
-				const caret = document.createElement('span'); caret.className = 'caret'; caret.innerHTML = '';
-				const name = document.createElement('span'); name.textContent = node.name;
-				el.innerHTML = `${iconSvg('dir', node.name)} <span>${node.name}</span>`;
-				const children = document.createElement('div'); children.className = 'children'; children.style.display = 'none';
-				let expanded = false;
-				el.addEventListener('click', () => {
-					expanded = !expanded;
-					children.style.display = expanded ? 'block' : 'none';
-					selectedDirectoryPath = node.path;
-					highlightSelectedDir(el);
-				});
+				el.innerHTML = `${iconSvg('dir', node.name)} <span class="label">${node.name}</span>`;
+				// Check if folder has children
+				const hasKids = (Array.isArray(node.children) && node.children.length > 0) || !!node.hasChildren;
+				let caret = null;
+				if (hasKids) {
+					el.classList.add('has-children');
+					// Add caret icon at the end (right side)
+					caret = document.createElement('span');
+					caret.className = 'caret';
+					caret.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+					el.appendChild(caret);
+				}
+				const children = document.createElement('div');
+				children.className = 'children';
+				// Start expanded (display: block) by default
+				children.style.display = 'block';
 				for (const child of node.children || []) {
 					children.appendChild(renderNode(child));
+				}
+				// Toggle expand/collapse
+				if (hasKids) {
+					const onToggle = (e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						const collapsed = el.classList.toggle('collapsed');
+						children.style.display = collapsed ? 'none' : 'block';
+						selectedDirectoryPath = node.path;
+						highlightSelectedDir(el);
+					};
+					el.addEventListener('click', onToggle, false);
+					if (caret) caret.addEventListener('click', onToggle, false);
+				} else {
+					el.addEventListener('click', () => {
+						selectedDirectoryPath = node.path;
+						highlightSelectedDir(el);
+					});
 				}
 				const container = document.createElement('div');
 				container.appendChild(el);
@@ -1740,6 +1805,16 @@ document.addEventListener('DOMContentLoaded', () => {
 					for (const t of openTabs) {
 						if (t && t._el) t._el.classList.toggle('active', t.path === path);
 					}
+					// Apply a subtle activate animation to the active tab
+					const activeTab = openTabs.find(t => t.path === path);
+					if (activeTab && activeTab._el) {
+						activeTab._el.classList.remove('just-activated');
+						// Force reflow to restart animation if needed
+						// eslint-disable-next-line no-unused-expressions
+						activeTab._el.offsetWidth;
+						activeTab._el.classList.add('just-activated');
+						setTimeout(() => { try { activeTab._el.classList.remove('just-activated'); } catch {} }, 220);
+					}
 				} catch {}
 				// Update filename and language in status bar
 				try { filenameEl.textContent = path; langEl.textContent = guessLanguage(path); } catch {}
@@ -1772,43 +1847,33 @@ document.addEventListener('DOMContentLoaded', () => {
 				return;
 			}
 			const tab = openTabs[tabIndex];
-			
-			// Add to closed stack for reopening
 			const model = modelsByPath.get(filePath);
+			// Snapshot for reopen
 			if (model) {
-				closedStack.push({
-					path: filePath,
-					content: model.getValue()
-				});
+				closedStack.push({ path: filePath, content: model.getValue() });
 			}
-			
-			tab._el.remove();
-			openTabs.splice(tabIndex, 1);
-			console.log('openTabs after close:', openTabs.map(t => t.path));
-			
-			if (model) {
-				model.dispose();
-				modelsByPath.delete(filePath);
-			}
-			if (activeTabPath === filePath) {
-				console.log('Closing active tab, switching to tab to the left or clearing editor');
-				if (openTabs.length > 0) {
-					// Find the tab to the left of the closed tab
-					let nextTabPath = null;
-					if (tabIndex > 0) {
-						// Activate the tab to the left
-						nextTabPath = openTabs[tabIndex - 1].path;
-					} else if (openTabs.length > 0) {
-						// If we closed the first tab, activate the new first tab
-						nextTabPath = openTabs[0].path;
-					}
-					if (nextTabPath) activateTab(nextTabPath);
-				} else {
-					activeTabPath = null;
-					updateEditorEnabled();
+			// Animate close then remove DOM and state
+			try { tab._el.classList.add('closing'); } catch {}
+			const finalize = () => {
+				try { tab._el.remove(); } catch {}
+				openTabs.splice(tabIndex, 1);
+				console.log('openTabs after close:', openTabs.map(t => t.path));
+				if (model) { try { model.dispose(); } catch {}; modelsByPath.delete(filePath); }
+				if (activeTabPath === filePath) {
+					console.log('Closing active tab, switching to tab to the left or clearing editor');
+					if (openTabs.length > 0) {
+						let nextTabPath = null;
+						if (tabIndex > 0) nextTabPath = openTabs[tabIndex - 1].path; else if (openTabs.length > 0) nextTabPath = openTabs[0].path;
+						if (nextTabPath) activateTab(nextTabPath);
+					} else { activeTabPath = null; updateEditorEnabled(); }
 				}
-			}
-			saveSession();
+				saveSession();
+			};
+			// Prefer animationend, fallback to timeout
+			let done = false;
+			const onEnd = () => { if (done) return; done = true; tab._el?.removeEventListener?.('animationend', onEnd); finalize(); };
+			try { tab._el.addEventListener('animationend', onEnd, { once: true }); } catch {}
+			setTimeout(onEnd, 150);
 		}
 
 		// Expose closeTab globally for context menu access
@@ -1976,6 +2041,32 @@ document.addEventListener('DOMContentLoaded', () => {
 			const pos = editor.getPosition(); 
 			if (!pos) return; 
 			cursorPosEl.textContent = `Ln ${pos.lineNumber}, Col ${pos.column}`; 
+		}
+
+		// Make tab size clickable to change it
+		function setupTabSizeClick() {
+			const tabSizeEl = document.getElementById('tabSize');
+			if (tabSizeEl) {
+				tabSizeEl.style.cursor = 'pointer';
+				tabSizeEl.addEventListener('click', async () => {
+					const val = await showInputModal({
+						title: 'Tab Size',
+						label: 'Number of spaces per tab',
+						placeholder: String(settings.tabSize),
+						okText: 'Apply',
+						validate: (v) => {
+							const num = parseInt(v, 10);
+							if (isNaN(num) || num < 1 || num > 16) return 'Enter a number between 1 and 16';
+							return '';
+						}
+					});
+					if (val) {
+						settings.tabSize = parseInt(val, 10);
+						saveSettings();
+						applySettings();
+					}
+				});
+			}
 		}
 
 		function guessLanguage(filePath) {
@@ -2288,6 +2379,10 @@ document.addEventListener('DOMContentLoaded', () => {
 				applySettings();
 				// Ensure correct enabled/disabled state on startup
 				updateEditorEnabled();
+				// Setup tab size click handler
+				setupTabSizeClick();
+				// Initial tab size display
+				updateTabSizeDisplay();
 
 				// Robust relayout to keep scrollbars visible across resizes/maximize
 				try {
