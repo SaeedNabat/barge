@@ -372,8 +372,8 @@ body.theme-light .breadcrumb-separator {
 .menu-item:hover kbd, .menu-item:focus-visible kbd { background: rgba(255,255,255,0.22); border-color: rgba(255,255,255,0.32); color: #0f172a; }
 /* Active menu item checkmark */
 .menu-item { position: relative; }
-.menu-item.active { padding-left: 28px; background: rgba(59, 130, 246, 0.30); color: #ffffff; text-shadow: 0 0 1px rgba(0,0,0,0.6); }
-.menu-item.active::before { content: '✓'; position: absolute; left: 10px; color: #93c5fd; font-size: 12px; }
+.menu-item.active { padding-left: 28px; background: rgba(59, 130, 246, 0.35); color: #ffffff; text-shadow: 0 0 1px rgba(0,0,0,0.6); font-weight: 500; }
+.menu-item.active::before { content: '✓'; position: absolute; left: 10px; color: #93c5fd; font-size: 12px; font-weight: bold; }
 .menu-sep { height: 1px; margin: 8px; background: linear-gradient(90deg, transparent, rgba(200,210,230,0.35), transparent); border-radius: 1px; }
 kbd { background: rgba(136, 189, 255, 0.18); border: 1px solid rgba(136, 189, 255, 0.3); padding: 2px 8px; border-radius: 8px; color: #ffffff; font-size: 11px; } 
 
@@ -1148,6 +1148,13 @@ body.theme-dracula .dropdown {
 	border-color: var(--border-color);
 	box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 10px 28px rgba(189, 147, 249, 0.15);
 }
+body.theme-dracula .menu-item.active {
+	background: rgba(189, 147, 249, 0.25);
+	color: #f8f8f2;
+}
+body.theme-dracula .menu-item.active::before {
+	color: #bd93f9;
+}
 
 /* Nord Theme UI */
 body.theme-nord {
@@ -1182,6 +1189,13 @@ body.theme-nord .dropdown {
 	border-color: var(--border-color);
 	box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 10px 28px rgba(136, 192, 208, 0.15);
 }
+body.theme-nord .menu-item.active {
+	background: rgba(136, 192, 208, 0.25);
+	color: #d8dee9;
+}
+body.theme-nord .menu-item.active::before {
+	color: #88c0d0;
+}
 
 /* Monokai Theme UI */
 body.theme-monokai {
@@ -1215,6 +1229,13 @@ body.theme-monokai .dropdown {
 	background: rgba(30, 31, 28, 0.98);
 	border-color: var(--border-color);
 	box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7), 0 10px 28px rgba(166, 226, 46, 0.12);
+}
+body.theme-monokai .menu-item.active {
+	background: rgba(166, 226, 46, 0.22);
+	color: #f8f8f2;
+}
+body.theme-monokai .menu-item.active::before {
+	color: #a6e22e;
 }
 
 /* Beautiful Cursor Effects */
