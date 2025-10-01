@@ -116,6 +116,7 @@ const modelsByPath = new Map(); const autosaveTimers = new Map();
 let closedStack = [];
 let currentWorkspaceRoot = null; let isOpeningFile = false; let isOpeningFolder = false;
 let untitledCounter = 1; let termInstance = null; let selectedDirectoryPath = null; let refreshTimer = null;
+let recentTabsHistory = []; // Track tab access order for Ctrl+Tab switching
 
 function isUntitledPath(p) {
 	if (!p) return true;
@@ -292,6 +293,7 @@ const settings = {
 	theme: 'dark',
 	autoSave: 'off', // off | afterDelay | onFocusChange
 	autoSaveDelay: 1000,
+	formatOnSave: false, // Format document on save
 	wordWrap: 'off', // off | on
 	lineNumbers: 'on', // on | off
 	renderWhitespace: 'none', // none | all | selection
@@ -391,6 +393,49 @@ function updateTabSizeDisplay() {
 	if (tabSizeEl) {
 		tabSizeEl.textContent = `Spaces: ${settings.tabSize}`;
 	}
+}
+
+function updateBreadcrumb(filePath) {
+	const breadcrumbEl = document.getElementById('breadcrumb');
+	if (!breadcrumbEl || !filePath) {
+		if (breadcrumbEl) breadcrumbEl.innerHTML = '';
+		return;
+	}
+	
+	// Split path into parts
+	const parts = filePath.split('/').filter(Boolean);
+	breadcrumbEl.innerHTML = '';
+	
+	// Build breadcrumb items
+	let currentPath = '';
+	parts.forEach((part, index) => {
+		currentPath += '/' + part;
+		const isLast = index === parts.length - 1;
+		
+		// Create breadcrumb item
+		const item = document.createElement('span');
+		item.className = 'breadcrumb-item';
+		item.textContent = part;
+		item.dataset.path = currentPath;
+		
+		// Make clickable (except last item)
+		if (!isLast) {
+			item.addEventListener('click', () => {
+				// Could open folder in file tree or show files in that directory
+				console.log('Breadcrumb clicked:', currentPath);
+			});
+		}
+		
+		breadcrumbEl.appendChild(item);
+		
+		// Add separator (except after last item)
+		if (!isLast) {
+			const sep = document.createElement('span');
+			sep.className = 'breadcrumb-separator';
+			sep.textContent = '/';
+			breadcrumbEl.appendChild(sep);
+		}
+	});
 }
 
 function applySettings() {
@@ -656,6 +701,7 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const prefsModal = document.getElementById('prefsModal');
 	const mViewToggleStatus = document.getElementById('mViewToggleStatus');
 	const fabGoTop = document.getElementById('fabGoTop');
+	const toggleMinimapBtn = document.getElementById('toggleMinimap');
 	const mViewToggleWordWrap = document.getElementById('mViewToggleWordWrap');
 	const mViewToggleLineNumbers = document.getElementById('mViewToggleLineNumbers');
 	const prefFontFamily = document.getElementById('prefFontFamily');
@@ -669,6 +715,7 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const prefsCancel = document.getElementById('prefsCancel');
 	const prefCursorBlink = document.getElementById('prefCursorBlink');
 	const prefCursorBlinkVal = document.getElementById('prefCursorBlinkVal');
+	const prefFormatOnSave = document.getElementById('prefFormatOnSave');
 
 	const mFileNew = document.getElementById('mFileNew');
 	const newFileBtn = document.getElementById('sidebarNewFile');
@@ -851,6 +898,7 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		}
 		prefAutoSave.value = settings.autoSave;
 		prefAutoSaveDelay.value = settings.autoSaveDelay;
+		if (prefFormatOnSave) prefFormatOnSave.checked = settings.formatOnSave || false;
 		if (prefCursorBlink) {
 			const val = Math.max(300, Math.min(3000, parseInt(settings.cursorBlinkMs || 1200, 10)));
 			prefCursorBlink.value = String(val);
@@ -875,6 +923,7 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		if (prefTabSize && prefTabSize.value) settings.tabSize = Math.max(1, Math.min(16, parseInt(prefTabSize.value, 10)));
 		settings.autoSave = prefAutoSave.value;
 		settings.autoSaveDelay = Math.max(100, Math.min(10000, parseInt(prefAutoSaveDelay.value || settings.autoSaveDelay, 10)));
+		if (prefFormatOnSave) settings.formatOnSave = prefFormatOnSave.checked;
 		if (prefCursorBlink && prefCursorBlink.value) settings.cursorBlinkMs = Math.max(300, Math.min(3000, parseInt(prefCursorBlink.value, 10)));
 		saveSettings();
 		applySettings();
@@ -928,6 +977,16 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		if (e.ctrlKey && e.key.toLowerCase() === 'g') { e.preventDefault(); mEditGoToLine?.click(); }
 		if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'z') { e.preventDefault(); mViewToggleWordWrap?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); openCmdPalette(); }
+		// Go to Symbol in File
+		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'o') { 
+			e.preventDefault(); 
+			editor?.getAction('editor.action.quickOutline')?.run(); 
+		}
+		// Go to Definition
+		if (e.key === 'F12') {
+			e.preventDefault();
+			editor?.getAction('editor.action.revealDefinition')?.run();
+		}
 		// Ctrl+K, Z chord for Zen Mode
 		if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
 			// wait for next key
@@ -960,6 +1019,23 @@ const sidebarOpenFolder = document.getElementById('sidebarOpenFolder');
 	safeBind(sidebarNewFolder, 'click', () => { window.createFolderFlow(); });
 safeBind(sidebarOpenFile, 'click', openFileFlow);
 safeBind(sidebarOpenFolder, 'click', openFolderFlow);
+
+	// Collapse All button in file tree
+	const collapseAllBtn = document.getElementById('collapseAllBtn');
+	safeBind(collapseAllBtn, 'click', () => {
+		const fileTree = document.getElementById('fileTree');
+		if (!fileTree) return;
+		// Collapse all folders
+		const allChildren = fileTree.querySelectorAll('.children');
+		allChildren.forEach(children => {
+			children.style.display = 'none';
+		});
+		// Reset all carets to collapsed state
+		const allCarets = fileTree.querySelectorAll('.caret');
+		allCarets.forEach(caret => {
+			caret.classList.remove('open');
+		});
+	});
 
 	document.addEventListener('click', (e) => { const t = e.target; if (t instanceof Element && t.id === 'sidebarNewFolder') { e.preventDefault(); window.createFolderFlow(); } }, true);
 
@@ -1670,8 +1746,31 @@ document.addEventListener('DOMContentLoaded', () => {
 				// Common actions
 				items.push(
 					{ label: 'Rename', action: () => { if (typeof renameFlow === 'function') renameFlow(path); else if (window.renameFlow) window.renameFlow(path); else alert('Rename not available'); } },
+					{ label: 'Duplicate', action: async () => { 
+						const name = path.split('/').pop();
+						const dir = path.substring(0, path.lastIndexOf('/'));
+						const ext = name.includes('.') ? '.' + name.split('.').pop() : '';
+						const baseName = name.includes('.') ? name.substring(0, name.lastIndexOf('.')) : name;
+						const newName = `${baseName}-copy${ext}`;
+						if (isDir) {
+							alert('Duplicate folder not yet implemented');
+						} else {
+							const file = await window.bridge.readFileByPath(path);
+							if (file && file.content !== undefined) {
+								const newPath = `${dir}/${newName}`;
+								await window.bridge.writeFileByPath({ filePath: newPath, content: file.content });
+								await refreshTree();
+							}
+						}
+					} },
 					{ label: 'Delete', action: () => { if (typeof deleteFlow === 'function') deleteFlow(path); else if (window.deleteFlow) window.deleteFlow(path); else alert('Delete not available'); } },
 					{ label: 'Copy Path', action: () => { try { navigator.clipboard?.writeText(path); } catch {} } },
+					{ label: 'Copy Relative Path', action: () => { 
+						try {
+							const relativePath = currentWorkspaceRoot ? path.replace(currentWorkspaceRoot + '/', '') : path;
+							navigator.clipboard?.writeText(relativePath);
+						} catch {}
+					} },
 					{ label: 'Reveal in OS', action: () => { if (window.bridge?.revealInOS) window.bridge.revealInOS(path); else alert('Reveal not available'); } },
 					{ label: 'Reveal (Select)', action: () => { highlightSelectedDir(target); } }
 				);
@@ -1793,6 +1892,12 @@ document.addEventListener('DOMContentLoaded', () => {
 				const model = modelsByPath.get(path);
 				if (!model) return;
 				activeTabPath = path;
+				
+				// Track in recent history for Ctrl+Tab
+				recentTabsHistory = recentTabsHistory.filter(p => p !== path);
+				recentTabsHistory.unshift(path);
+				if (recentTabsHistory.length > 20) recentTabsHistory = recentTabsHistory.slice(0, 20);
+				
 				if (activePane === 'right' && editor2Instance) {
 					editor2Instance.setModel(model);
 					editor2Instance.focus();
@@ -1818,7 +1923,10 @@ document.addEventListener('DOMContentLoaded', () => {
 				} catch {}
 				// Update filename and language in status bar
 				try { filenameEl.textContent = path; langEl.textContent = guessLanguage(path); } catch {}
+				// Update breadcrumb
+				updateBreadcrumb(path);
 				updateStatus();
+				detectEOL();
 				updateEditorEnabled();
 				saveSession();
 			} catch (e) { console.error('activateTab failed', e); }
@@ -1918,10 +2026,22 @@ document.addEventListener('DOMContentLoaded', () => {
 		// Make closeAllTabs available globally
 		window.__closeAllTabs = closeAllTabs;
 
-		function saveActiveFile() {
+		async function saveActiveFile() {
 			console.log('saveActiveFile called with activeTabPath:', activeTabPath);
 			console.log('autoSave setting:', settings.autoSave);
 			if (!activeTabPath || !editor) return;
+			
+			// Format on save if enabled
+			if (settings.formatOnSave) {
+				try {
+					const formatAction = editor.getAction('editor.action.formatDocument');
+					if (formatAction) {
+						await formatAction.run();
+					}
+				} catch (err) {
+					console.warn('Format on save failed:', err);
+				}
+			}
 			
 			const content = editor.getValue();
 			if (isUntitledPath(activeTabPath)) {
@@ -2041,8 +2161,59 @@ document.addEventListener('DOMContentLoaded', () => {
 			const pos = editor.getPosition(); 
 			if (!pos) return; 
 			cursorPosEl.textContent = `Ln ${pos.lineNumber}, Col ${pos.column}`; 
+			
+			// Update selection info
+			const selection = editor.getSelection();
+			if (selection && !selection.isEmpty()) {
+				const model = editor.getModel();
+				if (model) {
+					const selectedText = model.getValueInRange(selection);
+					const chars = selectedText.length;
+					const lines = selectedText.split('\n').length;
+					const words = selectedText.trim().split(/\s+/).filter(Boolean).length;
+					
+					if (lines > 1) {
+						selectionEl.textContent = `${lines} lines, ${chars} chars`;
+					} else {
+						selectionEl.textContent = `${chars} chars, ${words} words`;
+					}
+				}
+			} else {
+				selectionEl.textContent = '';
+			}
 		}
 
+		// Detect and display git branch
+		async function updateGitBranch() {
+			if (!currentWorkspaceRoot || !gitBranchEl) return;
+			try {
+				// Try to read .git/HEAD to get current branch
+				const gitHeadPath = `${currentWorkspaceRoot}/.git/HEAD`;
+				const result = await window.bridge.readFileByPath(gitHeadPath);
+				if (result && result.content) {
+					const match = result.content.match(/ref: refs\/heads\/(.+)/);
+					if (match) {
+						gitBranchEl.textContent = ` ${match[1].trim()}`;
+					} else {
+						gitBranchEl.textContent = '';
+					}
+				} else {
+					gitBranchEl.textContent = '';
+				}
+			} catch {
+				gitBranchEl.textContent = '';
+			}
+		}
+		
+		// Detect line ending type
+		function detectEOL() {
+			if (!editor || !eolEl) return;
+			const model = editor.getModel();
+			if (!model) return;
+			const eol = model.getEOL();
+			eolEl.textContent = eol === '\n' ? 'LF' : 'CRLF';
+		}
+		
 		// Make tab size clickable to change it
 		function setupTabSizeClick() {
 			const tabSizeEl = document.getElementById('tabSize');
@@ -2146,12 +2317,43 @@ document.addEventListener('DOMContentLoaded', () => {
 			}
 		});
 
+		// Drag and Drop support for opening files from OS
+		document.addEventListener('dragover', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			e.dataTransfer.dropEffect = 'copy';
+		});
+		
+		document.addEventListener('drop', async (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			
+			const files = Array.from(e.dataTransfer.files);
+			if (files.length === 0) return;
+			
+			// Open each dropped file
+			for (const file of files) {
+				try {
+					const filePath = file.path; // Electron provides the full path
+					if (filePath) {
+						const content = await window.bridge.readFileByPath(filePath);
+						if (content && content.content !== undefined) {
+							openInTabSafe(filePath, content.content);
+						}
+					}
+				} catch (err) {
+					console.error('Failed to open dropped file:', err);
+				}
+			}
+		});
+
 		// Set up bridge event listeners
 		window.bridge?.onFolderOpened?.((payload) => { 
 			currentWorkspaceRoot = payload.root; 
 			renderTree(payload.root, payload.tree); 
 			clearEditor(); 
-			updateEmptyState(); 
+			updateEmptyState();
+			updateGitBranch(); 
 		});
 		
 		window.bridge?.onFileOpened?.((payload) => { 
@@ -2190,6 +2392,25 @@ document.addEventListener('DOMContentLoaded', () => {
 		const tabsEl = document.getElementById('tabs');
 		const cursorPosEl = document.getElementById('cursorPos');
 		const langEl = document.getElementById('lang');
+		const gitBranchEl = document.getElementById('gitBranch');
+		const selectionEl = document.getElementById('selection');
+		const encodingEl = document.getElementById('encoding');
+		const eolEl = document.getElementById('eol');
+		// Fuzzy match function
+		const fuzzyMatch = (str, pattern) => {
+			const strLower = str.toLowerCase();
+			const patternLower = pattern.toLowerCase();
+			let patternIdx = 0;
+			let strIdx = 0;
+			while (strIdx < strLower.length && patternIdx < patternLower.length) {
+				if (strLower[strIdx] === patternLower[patternIdx]) {
+					patternIdx++;
+				}
+				strIdx++;
+			}
+			return patternIdx === patternLower.length;
+		};
+
 		const fileTreeFilter = document.getElementById('fileTreeFilter');
 		if (fileTreeFilter) {
 			const applyTreeFilter = () => {
@@ -2203,22 +2424,22 @@ document.addEventListener('DOMContentLoaded', () => {
 					return;
 				}
 				const items = fileTreeEl.querySelectorAll('.item');
-				const ql = q.toLowerCase();
 				items.forEach(it => {
 					const type = it.dataset.type || '';
 					const nameEl = it.querySelector('span');
-					const name = (nameEl?.textContent || '').toLowerCase();
+					const name = (nameEl?.textContent || '');
 					let match = false;
 					if (type === 'file') {
-						match = name.includes(ql);
+						// Use fuzzy matching for files
+						match = fuzzyMatch(name, q);
 					} else {
 						// For directories: keep visible if self name matches OR any descendant file matches
-						match = name.includes(ql);
+						match = fuzzyMatch(name, q);
 						if (!match) {
 							const container = it.nextSibling && it.nextSibling.classList && it.nextSibling.classList.contains('children') ? it.nextSibling : null;
 							if (container) {
 								const childFiles = container.querySelectorAll('.item[data-type="file"]');
-								match = Array.from(childFiles).some(cf => (cf.querySelector('span')?.textContent || '').toLowerCase().includes(ql));
+								match = Array.from(childFiles).some(cf => fuzzyMatch(cf.querySelector('span')?.textContent || '', q));
 							}
 						}
 					}
@@ -2348,11 +2569,22 @@ document.addEventListener('DOMContentLoaded', () => {
 				fontSize: settings.fontSize,
 				autoClosingBrackets: 'languageDefined',
 				autoClosingQuotes: 'languageDefined',
+				autoClosingOvertype: 'always',
+				autoSurround: 'languageDefined',
 				cursorSurroundingLines: 3,
 				cursorSurroundingLinesStyle: "default",
 				smoothScrolling: true,
 				bracketPairColorization: { enabled: true },
 				matchBrackets: 'always',
+				stickyScroll: { enabled: true },
+				guides: {
+					indentation: true,
+					highlightActiveIndentation: true,
+					bracketPairs: true
+				},
+				renderWhitespace: 'selection',
+				trimAutoWhitespace: true,
+				colorDecorators: true,
 				scrollbar: { vertical: 'visible', horizontal: 'hidden', verticalScrollbarSize: 12, useShadows: false, alwaysConsumeMouseWheel: true }
 			});
 
@@ -2542,6 +2774,20 @@ document.addEventListener('DOMContentLoaded', () => {
 							editor.revealLineInCenter(1);
 							editor.setPosition({ lineNumber: 1, column: 1 });
 							editor.focus();
+						} catch {}
+					});
+					
+					// Toggle minimap button
+					safeBind(toggleMinimapBtn, 'click', () => {
+						try {
+							if (!editor) return;
+							const opts = editor.getRawOptions();
+							const enabled = !opts.minimap?.enabled;
+							editor.updateOptions({ minimap: { enabled } });
+							if (editor2Instance) {
+								editor2Instance.updateOptions({ minimap: { enabled } });
+							}
+							toggleMinimapBtn.classList.toggle('active', enabled);
 						} catch {}
 					});
 				// Format and Problems toggles
@@ -2813,6 +3059,28 @@ document.addEventListener('DOMContentLoaded', () => {
 	// keyboard
 	document.addEventListener('keydown', (e) => {
 		if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'p') { e.preventDefault(); openQuickOpen(); }
+		
+		// Ctrl+Tab: Switch to previous tab in history
+		if (e.ctrlKey && e.key === 'Tab' && !e.shiftKey) {
+			e.preventDefault();
+			if (recentTabsHistory.length > 1) {
+				// Get the second most recent (first is current)
+				const nextPath = recentTabsHistory[1];
+				if (nextPath && openTabs.find(t => t.path === nextPath)) {
+					activateTab(nextPath);
+				}
+			}
+		}
+		
+		// Ctrl+Shift+Tab: Cycle forward through tabs
+		if (e.ctrlKey && e.key === 'Tab' && e.shiftKey) {
+			e.preventDefault();
+			const currentIndex = openTabs.findIndex(t => t.path === activeTabPath);
+			if (currentIndex !== -1 && openTabs.length > 1) {
+				const nextIndex = (currentIndex + 1) % openTabs.length;
+				activateTab(openTabs[nextIndex].path);
+			}
+		}
 	}, true);
 
 		// After creating initial tabs or editor, ensure DnD is enabled

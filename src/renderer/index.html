@@ -126,13 +126,25 @@
 					</div>
 					<div class="file-tree-filter">
 						<input id="fileTreeFilter" type="text" placeholder="Filter files (filename contains…)" />
+						<button id="collapseAllBtn" class="icon-btn" title="Collapse All" aria-label="Collapse All Folders">
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<polyline points="6 9 12 15 18 9"></polyline>
+							</svg>
+						</button>
 					</div>
 					<div id="fileTree" class="file-tree"></div>
 				</aside>
 				<main class="main">
 					<header class="topbar">
 						<div class="tabs" id="tabs"></div>
+						<div class="breadcrumb" id="breadcrumb"></div>
 						<div class="actions">
+							<button id="toggleMinimap" class="icon-btn" title="Toggle Minimap" aria-label="Toggle Minimap">
+								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<rect x="3" y="3" width="18" height="18" rx="2"/>
+									<path d="M9 3v18"/>
+								</svg>
+							</button>
 							<span id="filename"></span>
 						</div>
 					</header>
@@ -159,8 +171,12 @@
 						<div id="terminalViews" class="terminal-views"></div>
 					</div>
 					<footer class="statusbar">
+						<span id="gitBranch" class="git-branch" title="Git branch"></span>
 						<span id="cursorPos">Ln 1, Col 1</span>
+						<span id="selection" class="selection-info" title="Selection"></span>
 						<span id="lang">plaintext</span>
+						<span id="encoding" class="encoding" title="File encoding">UTF-8</span>
+						<span id="eol" class="eol" title="Line ending">LF</span>
 						<span id="tabSize" class="tab-size" title="Click to change tab size">Spaces: 4</span>
 						<span id="problemsCount" class="problems-count" aria-live="polite"></span>
 					</footer>
@@ -212,6 +228,10 @@
 					<label class="field" id="autoSaveDelayField">
 						<span>Auto save delay (ms)</span>
 						<input id="prefAutoSaveDelay" type="number" min="100" max="10000" step="100" />
+					</label>
+					<label class="field">
+						<span>Format on save</span>
+						<input id="prefFormatOnSave" type="checkbox" />
 					</label>
 					<div class="field">
 						<span>Cursor Blink Rate <small id="prefCursorBlinkVal" style="opacity:.8;margin-left:6px;">1200 ms</small></span>
