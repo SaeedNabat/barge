@@ -1652,16 +1652,17 @@ document.addEventListener('DOMContentLoaded', () => {
 				let caret = null;
 				if (hasKids) {
 					el.classList.add('has-children');
+					el.classList.add('collapsed'); // Start collapsed
 					// Add caret icon at the end (right side)
 					caret = document.createElement('span');
-					caret.className = 'caret open'; // Add 'open' class by default
+					caret.className = 'caret'; // Start closed (no 'open' class)
 					caret.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
 					el.appendChild(caret);
 				}
 				const children = document.createElement('div');
 				children.className = 'children';
-				// Start expanded (display: block) by default
-				children.style.display = 'block';
+				// Start collapsed (display: none) by default
+				children.style.display = 'none';
 				for (const child of node.children || []) {
 					children.appendChild(renderNode(child));
 				}
