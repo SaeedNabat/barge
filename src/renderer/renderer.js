@@ -102,7 +102,11 @@ function openInTabSafe(filePath, content) {
 	window.__PENDING_OPEN__ = { filePath, content };
 }
 
-let monacoRef = null; let editor = null; let openTabs = []; let activeTabPath = null;
+let monacoRef = null; let editor = null;
+// Use window.openTabs directly so context menu can access it
+window.openTabs = window.openTabs || [];
+let openTabs = window.openTabs; // Keep local reference for compatibility
+let activeTabPath = null;
 let editor2Instance = null; let activePane = 'left';
 const modelsByPath = new Map(); const autosaveTimers = new Map();
 let closedStack = [];
@@ -1743,57 +1747,57 @@ document.addEventListener('DOMContentLoaded', () => {
 				}, 0);
 			}
 			
-			container.addEventListener('contextmenu', (e) => {
-				e.preventDefault();
-				const target = (e.target instanceof Element) ? e.target.closest('.item') : null;
-				if (!target) return;
-				highlightSelectedDir(target);
-				const path = target.dataset.path || '';
-				const kind = target.dataset.type || '';
-				const isDir = kind === 'dir' || !!(target.nextSibling && target.nextSibling.classList && target.nextSibling.classList.contains('children'));
-				const items = [];
-				if (isDir) {
-					items.push(
-						{ label: 'New File', action: () => { selectedDirectoryPath = path; document.getElementById('sidebarNewFile')?.click(); } },
-						{ label: 'New Folder', action: () => { selectedDirectoryPath = path; window.createFolderFlow?.(); } },
-					);
-				}
-				if (!isDir) {
-					items.push({ label: 'Open', action: async () => { const file = await window.bridge.readFileByPath(path); openInTabSafe(path, file?.content ?? ''); } });
-				}
-				// Common actions
-				items.push(
-					{ label: 'Rename', action: () => { if (typeof renameFlow === 'function') renameFlow(path); else if (window.renameFlow) window.renameFlow(path); else alert('Rename not available'); } },
-					{ label: 'Duplicate', action: async () => { 
-						const name = path.split('/').pop();
-						const dir = path.substring(0, path.lastIndexOf('/'));
-						const ext = name.includes('.') ? '.' + name.split('.').pop() : '';
-						const baseName = name.includes('.') ? name.substring(0, name.lastIndexOf('.')) : name;
-						const newName = `${baseName}-copy${ext}`;
-						if (isDir) {
-							alert('Duplicate folder not yet implemented');
-						} else {
-							const file = await window.bridge.readFileByPath(path);
-							if (file && file.content !== undefined) {
-								const newPath = `${dir}/${newName}`;
-								await window.bridge.writeFileByPath({ filePath: newPath, content: file.content });
-								await refreshTree();
-							}
-						}
-					} },
-					{ label: 'Delete', action: () => { if (typeof deleteFlow === 'function') deleteFlow(path); else if (window.deleteFlow) window.deleteFlow(path); else alert('Delete not available'); } },
-					{ label: 'Copy Path', action: () => { try { navigator.clipboard?.writeText(path); } catch {} } },
-					{ label: 'Copy Relative Path', action: () => { 
-						try {
-							const relativePath = currentWorkspaceRoot ? path.replace(currentWorkspaceRoot + '/', '') : path;
-							navigator.clipboard?.writeText(relativePath);
-						} catch {}
-					} },
-					{ label: 'Reveal in OS', action: () => { if (window.bridge?.revealInOS) window.bridge.revealInOS(path); else alert('Reveal not available'); } },
-					{ label: 'Reveal (Select)', action: () => { highlightSelectedDir(target); } }
-				);
-				showMenu(e.pageX, e.pageY, items);
-			}, false);
+// OLD MENU DISABLED: 			container.addEventListener('contextmenu', (e) => {
+// OLD MENU DISABLED: 				e.preventDefault();
+// OLD MENU DISABLED: 				const target = (e.target instanceof Element) ? e.target.closest('.item') : null;
+// OLD MENU DISABLED: 				if (!target) return;
+// OLD MENU DISABLED: 				highlightSelectedDir(target);
+// OLD MENU DISABLED: 				const path = target.dataset.path || '';
+// OLD MENU DISABLED: 				const kind = target.dataset.type || '';
+// OLD MENU DISABLED: 				const isDir = kind === 'dir' || !!(target.nextSibling && target.nextSibling.classList && target.nextSibling.classList.contains('children'));
+// OLD MENU DISABLED: 				const items = [];
+// OLD MENU DISABLED: 				if (isDir) {
+// OLD MENU DISABLED: 					items.push(
+// OLD MENU DISABLED: 						{ label: 'New File', action: () => { selectedDirectoryPath = path; document.getElementById('sidebarNewFile')?.click(); } },
+// OLD MENU DISABLED: 						{ label: 'New Folder', action: () => { selectedDirectoryPath = path; window.createFolderFlow?.(); } },
+// OLD MENU DISABLED: 					);
+// OLD MENU DISABLED: 				}
+// OLD MENU DISABLED: 				if (!isDir) {
+// OLD MENU DISABLED: 					items.push({ label: 'Open', action: async () => { const file = await window.bridge.readFileByPath(path); openInTabSafe(path, file?.content ?? ''); } });
+// OLD MENU DISABLED: 				}
+// OLD MENU DISABLED: 				// Common actions
+// OLD MENU DISABLED: 				items.push(
+// OLD MENU DISABLED: 					{ label: 'Rename', action: () => { if (typeof renameFlow === 'function') renameFlow(path); else if (window.renameFlow) window.renameFlow(path); else alert('Rename not available'); } },
+// OLD MENU DISABLED: 					{ label: 'Duplicate', action: async () => { 
+// OLD MENU DISABLED: 						const name = path.split('/').pop();
+// OLD MENU DISABLED: 						const dir = path.substring(0, path.lastIndexOf('/'));
+// OLD MENU DISABLED: 						const ext = name.includes('.') ? '.' + name.split('.').pop() : '';
+// OLD MENU DISABLED: 						const baseName = name.includes('.') ? name.substring(0, name.lastIndexOf('.')) : name;
+// OLD MENU DISABLED: 						const newName = `${baseName}-copy${ext}`;
+// OLD MENU DISABLED: 						if (isDir) {
+// OLD MENU DISABLED: 							alert('Duplicate folder not yet implemented');
+// OLD MENU DISABLED: 						} else {
+// OLD MENU DISABLED: 							const file = await window.bridge.readFileByPath(path);
+// OLD MENU DISABLED: 							if (file && file.content !== undefined) {
+// OLD MENU DISABLED: 								const newPath = `${dir}/${newName}`;
+// OLD MENU DISABLED: 								await window.bridge.writeFileByPath({ filePath: newPath, content: file.content });
+// OLD MENU DISABLED: 								await refreshTree();
+// OLD MENU DISABLED: 							}
+// OLD MENU DISABLED: 						}
+// OLD MENU DISABLED: 					} },
+// OLD MENU DISABLED: 					{ label: 'Delete', action: () => { if (typeof deleteFlow === 'function') deleteFlow(path); else if (window.deleteFlow) window.deleteFlow(path); else alert('Delete not available'); } },
+// OLD MENU DISABLED: 					{ label: 'Copy Path', action: () => { try { navigator.clipboard?.writeText(path); } catch {} } },
+// OLD MENU DISABLED: 					{ label: 'Copy Relative Path', action: () => { 
+// OLD MENU DISABLED: 						try {
+// OLD MENU DISABLED: 							const relativePath = currentWorkspaceRoot ? path.replace(currentWorkspaceRoot + '/', '') : path;
+// OLD MENU DISABLED: 							navigator.clipboard?.writeText(relativePath);
+// OLD MENU DISABLED: 						} catch {}
+// OLD MENU DISABLED: 					} },
+// OLD MENU DISABLED: 					{ label: 'Reveal in OS', action: () => { if (window.bridge?.revealInOS) window.bridge.revealInOS(path); else alert('Reveal not available'); } },
+// OLD MENU DISABLED: 					{ label: 'Reveal (Select)', action: () => { highlightSelectedDir(target); } }
+// OLD MENU DISABLED: 				);
+// OLD MENU DISABLED: 				showMenu(e.pageX, e.pageY, items);
+// OLD MENU DISABLED: 			}, false);
 		}
 
 				function enableTreeKeyboard(container) {
@@ -2023,15 +2027,25 @@ document.addEventListener('DOMContentLoaded', () => {
 		window.clearEditor = clearEditor;
 
 		function closeAllTabs() {
-			// Close all tabs
-			while (openTabs.length > 0) {
-				const tab = openTabs[0];
+			console.log('[closeAllTabs] Starting with', openTabs.length, 'tabs');
+			// Create a snapshot to avoid mutation issues during iteration
+			const tabsToClose = [...openTabs];
+			console.log('[closeAllTabs] Snapshot created:', tabsToClose.length, 'tabs');
+			
+			// Close all tabs from the snapshot
+			tabsToClose.forEach((tab, index) => {
+				console.log('[closeAllTabs] Closing tab', index + 1, '/', tabsToClose.length, ':', tab.path);
 				closeTab(tab.path);
-			}
+			});
+			
+			// Clear any remaining tabs (safety check)
+			openTabs.length = 0;
+			
 			// Clear the editor
 			clearEditor();
 			activeTabPath = null;
 			updateEmptyState();
+			console.log('[closeAllTabs] Complete');
 		}
 
 		// Make closeAllTabs available globally
@@ -3890,51 +3904,71 @@ window.getCmdIcon = function(commandId) {
 	function handleContextAction(action, tabPath) {
 		// Create a snapshot to avoid mutation issues
 		const openTabs = window.openTabs ? [...window.openTabs] : [];
+		console.log('[Context Menu] Action:', action, 'TabPath:', tabPath, 'OpenTabs:', openTabs.length);
+		console.log('[Context Menu] window.__closeTab available?', !!window.__closeTab);
+		console.log('[Context Menu] window.__closeAllTabs available?', !!window.__closeAllTabs);
 		
 		switch (action) {
 			case 'close':
+				console.log('[Context Menu] Closing single tab:', tabPath);
 				if (window.__closeTab) {
 					window.__closeTab(tabPath);
+				} else {
+					console.error('[Context Menu] window.__closeTab not found!');
 				}
 				break;
 				
 			case 'close-others':
 				const othersToClose = openTabs.filter(tab => tab.path !== tabPath);
+				console.log('[Context Menu] Close others - found', othersToClose.length, 'tabs');
 				if (othersToClose.length > 0 && confirm(`Close ${othersToClose.length} other tabs?`)) {
+					console.log('[Context Menu] User confirmed, closing...');
 					othersToClose.forEach(tab => {
+						console.log('[Context Menu] Closing tab:', tab.path);
 						if (window.__closeTab) {
 							window.__closeTab(tab.path);
 						}
 					});
+					console.log('[Context Menu] Close others complete');
 				}
 				break;
 				
 			case 'close-right':
 				const idx = openTabs.findIndex(t => t.path === tabPath);
+				console.log('[Context Menu] Current tab index:', idx, 'of', openTabs.length);
 				if (idx >= 0 && idx < openTabs.length - 1) {
 					const rightTabs = openTabs.slice(idx + 1);
+					console.log('[Context Menu] Tabs to right:', rightTabs.length);
 					if (confirm(`Close ${rightTabs.length} tabs to the right?`)) {
+						console.log('[Context Menu] User confirmed, closing right tabs...');
 						rightTabs.forEach(tab => {
+							console.log('[Context Menu] Closing tab:', tab.path);
 							if (window.__closeTab) {
 								window.__closeTab(tab.path);
 							}
 						});
+						console.log('[Context Menu] Close right complete');
 					}
 				}
 				break;
 				
 			case 'close-all':
+				console.log('[Context Menu] Close all -', openTabs.length, 'tabs');
 				if (openTabs.length > 0 && confirm(`Close all ${openTabs.length} tabs? Any unsaved changes will be lost.`)) {
+					console.log('[Context Menu] User confirmed close all');
 					if (window.__closeAllTabs) {
+						console.log('[Context Menu] Using __closeAllTabs function');
 						window.__closeAllTabs();
 					} else {
-						// Fallback: close each tab from the snapshot
+						console.log('[Context Menu] Using fallback individual close');
 						openTabs.forEach(tab => {
+							console.log('[Context Menu] Closing tab:', tab.path);
 							if (window.__closeTab) {
 								window.__closeTab(tab.path);
 							}
 						});
 					}
+					console.log('[Context Menu] Close all complete');
 				}
 				break;
 				
@@ -4002,11 +4036,411 @@ window.getCmdIcon = function(commandId) {
 
 // Document-level event delegation for tab context menu (works with dynamic tabs)
 document.addEventListener('contextmenu', (e) => {
-const tab = e.target.closest('.tab');
-if (tab && window.showTabContextMenu) {
-tDefault();
-dow.showTabContextMenu(e, tab);
-}
+	const tab = e.target.closest('.tab');
+	if (tab && window.showTabContextMenu) {
+		e.preventDefault();
+		window.showTabContextMenu(e, tab);
+	}
 }, true);
 
 console.log('✨ Tab context menu document delegation enabled');
+
+// ===== FILE TREE CONTEXT MENU =====
+(function() {
+	let fileTreeContextMenu = null;
+	let fileTreeContextTarget = null;
+
+	function createFileTreeContextMenu() {
+		if (fileTreeContextMenu) return fileTreeContextMenu;
+		
+		fileTreeContextMenu = document.createElement('div');
+		fileTreeContextMenu.className = 'file-tree-context-menu';
+		fileTreeContextMenu.innerHTML = `
+			<div class="file-context-item" data-action="open">
+				<span class="icon">📂</span>
+				<span>Open</span>
+			</div>
+			<div class="file-context-item" data-action="rename">
+				<span class="icon">✏️</span>
+				<span>Rename</span>
+			</div>
+			<div class="file-context-item" data-action="duplicate">
+				<span class="icon">📋</span>
+				<span>Duplicate</span>
+			</div>
+			<div class="file-context-separator"></div>
+			<div class="file-context-item" data-action="copy-path">
+				<span class="icon">📄</span>
+				<span>Copy Path</span>
+			</div>
+			<div class="file-context-item" data-action="copy-relative-path">
+				<span class="icon">📝</span>
+				<span>Copy Relative Path</span>
+			</div>
+			<div class="file-context-separator"></div>
+			<div class="file-context-item" data-action="new-file">
+				<span class="icon">➕</span>
+				<span>New File</span>
+			</div>
+			<div class="file-context-item" data-action="new-folder">
+				<span class="icon">📁</span>
+				<span>New Folder</span>
+			</div>
+			<div class="file-context-separator"></div>
+			<div class="file-context-item" data-action="reveal-in-os">
+				<span class="icon">🗂️</span>
+				<span>Reveal in File Manager</span>
+			</div>
+			<div class="file-context-separator"></div>
+			<div class="file-context-item danger" data-action="delete">
+				<span class="icon">🗑️</span>
+				<span>Delete</span>
+			</div>
+		`;
+		
+		document.body.appendChild(fileTreeContextMenu);
+		
+		fileTreeContextMenu.addEventListener('click', (e) => {
+			const item = e.target.closest('.file-context-item');
+			if (!item || !fileTreeContextTarget) return;
+			
+			const action = item.dataset.action;
+			const itemPath = fileTreeContextTarget.dataset.path;
+			const itemType = fileTreeContextTarget.dataset.type;
+			
+			handleFileTreeContextAction(action, itemPath, itemType);
+			hideFileTreeContextMenu();
+		});
+		
+		document.addEventListener('click', (e) => {
+			if (!fileTreeContextMenu.contains(e.target) && !e.target.closest('.file-tree .item')) {
+				hideFileTreeContextMenu();
+			}
+		});
+		
+		return fileTreeContextMenu;
+	}
+
+	function showFileTreeContextMenu(e, item) {
+		e.preventDefault();
+		
+		const menu = createFileTreeContextMenu();
+		fileTreeContextTarget = item;
+		
+		// Adjust menu items based on file type
+		const isDirectory = item.dataset.type === 'dir';
+		const openItem = menu.querySelector('[data-action="open"]');
+		if (openItem) {
+			openItem.innerHTML = isDirectory 
+				? '<span class="icon">📂</span><span>Expand/Collapse</span>'
+				: '<span class="icon">📄</span><span>Open</span>';
+		}
+		
+		const x = Math.min(e.clientX, window.innerWidth - 240);
+		const y = Math.min(e.clientY, window.innerHeight - 450);
+		
+		menu.style.left = x + 'px';
+		menu.style.top = y + 'px';
+		menu.classList.add('visible');
+	}
+
+	function hideFileTreeContextMenu() {
+		if (fileTreeContextMenu) {
+			fileTreeContextMenu.classList.remove('visible');
+		}
+		fileTreeContextTarget = null;
+	}
+
+	function handleFileTreeContextAction(action, itemPath, itemType) {
+		console.log('[File Tree Context] Action:', action, 'Path:', itemPath, 'Type:', itemType);
+		
+		switch (action) {
+			case 'open':
+				console.log('[File Tree Context] Opening:', itemPath);
+				if (itemType === 'file') {
+					// Open file in editor
+					if (window.bridge && window.bridge.readFileByPath) {
+						window.bridge.readFileByPath(itemPath).then(file => {
+							if (file && file.content !== undefined && window.bargeOpenFileInTab) {
+								window.bargeOpenFileInTab(itemPath, file.content);
+							}
+						});
+					}
+				} else {
+					// Toggle folder
+					fileTreeContextTarget?.click();
+				}
+				break;
+				
+			case 'rename':
+				console.log('[File Tree Context] Rename:', itemPath);
+				if (window.renameFileFlow) {
+					window.renameFileFlow(itemPath);
+				} else {
+					const newName = prompt('Enter new name:', itemPath.split('/').pop());
+					if (newName && window.bridge && window.bridge.renameFile) {
+						const newPath = itemPath.replace(/[^/]+$/, newName);
+						window.bridge.renameFile(itemPath, newPath).then(() => {
+							console.log('Renamed to:', newPath);
+						}).catch(err => {
+							console.error('Rename failed:', err);
+							alert('Failed to rename: ' + err.message);
+						});
+					}
+				}
+				break;
+				
+			case 'duplicate':
+				console.log('[File Tree Context] Duplicate:', itemPath);
+				const baseName = itemPath.split('/').pop();
+				const dirPath = itemPath.substring(0, itemPath.lastIndexOf('/'));
+				const copyName = prompt('Enter name for duplicate:', baseName + ' copy');
+				if (copyName && window.bridge && window.bridge.duplicateFile) {
+					const copyPath = dirPath + '/' + copyName;
+					window.bridge.duplicateFile(itemPath, copyPath).then(() => {
+						console.log('Duplicated to:', copyPath);
+					}).catch(err => {
+						console.error('Duplicate failed:', err);
+						alert('Failed to duplicate: ' + err.message);
+					});
+				}
+				break;
+				
+			case 'copy-path':
+				console.log('[File Tree Context] Copy path:', itemPath);
+				if (navigator.clipboard) {
+					navigator.clipboard.writeText(itemPath).then(() => {
+						console.log('Path copied successfully');
+					}).catch(err => {
+						console.error('Failed to copy path:', err);
+					});
+				}
+				break;
+				
+			case 'copy-relative-path':
+				console.log('[File Tree Context] Copy relative path:', itemPath);
+				const workspaceRoot = window.currentWorkspaceRoot || '';
+				const relativePath = itemPath.replace(workspaceRoot + '/', '');
+				if (navigator.clipboard) {
+					navigator.clipboard.writeText(relativePath).then(() => {
+						console.log('Relative path copied:', relativePath);
+					}).catch(err => {
+						console.error('Failed to copy relative path:', err);
+					});
+				}
+				break;
+				
+			case 'new-file':
+				console.log('[File Tree Context] New file in:', itemPath);
+				if (window.createFileFlow) {
+					window.createFileFlow();
+				}
+				break;
+				
+			case 'new-folder':
+				console.log('[File Tree Context] New folder in:', itemPath);
+				if (window.createFolderFlow) {
+					window.createFolderFlow();
+				}
+				break;
+				
+			case 'reveal-in-os':
+				console.log('[File Tree Context] Reveal in OS:', itemPath);
+				if (window.bridge && window.bridge.revealInOS) {
+					window.bridge.revealInOS(itemPath);
+				}
+				break;
+				
+			case 'delete':
+				console.log('[File Tree Context] Delete:', itemPath);
+				const fileName = itemPath.split('/').pop();
+				if (confirm(`Delete "${fileName}"? This action cannot be undone.`)) {
+					if (window.bridge && window.bridge.deleteFile) {
+						window.bridge.deleteFile(itemPath).then(() => {
+							console.log('Deleted:', itemPath);
+						}).catch(err => {
+							console.error('Delete failed:', err);
+							alert('Failed to delete: ' + err.message);
+						});
+					}
+				}
+				break;
+				
+			default:
+				console.warn('[File Tree Context] Unknown action:', action);
+		}
+	}
+
+	// Document-level event delegation for file tree context menu
+	document.addEventListener('contextmenu', (e) => {
+		const treeItem = e.target.closest('.file-tree .item');
+		if (treeItem && treeItem.dataset.path) {
+			e.preventDefault();
+			showFileTreeContextMenu(e, treeItem);
+		}
+	}, true);
+
+	window.showFileTreeContextMenu = showFileTreeContextMenu;
+	window.hideFileTreeContextMenu = hideFileTreeContextMenu;
+	
+	console.log('✨ File Tree Context Menu loaded');
+})();
+
+// ===== MULTI-FILE SEARCH =====
+(function() {
+	let searchPanel = null;
+	let searchResults = [];
+	
+	function createSearchPanel() {
+		if (searchPanel) return;
+		
+		searchPanel = document.createElement('div');
+		searchPanel.id = 'searchPanel';
+		searchPanel.className = 'search-panel hidden';
+		searchPanel.innerHTML = `
+			<div class="search-header">
+				<input type="text" id="searchQuery" placeholder="Search in files..." />
+				<label><input type="checkbox" id="searchRegex" /> Regex</label>
+				<label><input type="checkbox" id="searchCase" /> Match Case</label>
+				<button id="searchClose">✕</button>
+			</div>
+			<div class="search-results" id="searchResults"></div>
+		`;
+		document.body.appendChild(searchPanel);
+		
+		document.getElementById('searchQuery').addEventListener('input', function() { clearTimeout(window._searchTimeout); window._searchTimeout = setTimeout(window.performSearch, 300); });
+		document.getElementById('searchClose').addEventListener('click', hideSearch);
+	}
+	
+	
+	async function performSearch() {
+		const query = document.getElementById('searchQuery').value;
+		if (!query) return;
+		
+		const isRegex = document.getElementById('searchRegex').checked;
+		const caseSensitive = document.getElementById('searchCase').checked;
+		
+		// Search implementation
+		console.log('Searching:', query, { isRegex, caseSensitive });
+	}
+	
+	function showSearch() {
+		createSearchPanel();
+		searchPanel.classList.remove('hidden');
+		document.getElementById('searchQuery').focus();
+	}
+	
+	function hideSearch() {
+		if (searchPanel) searchPanel.classList.add('hidden');
+	}
+	
+	window.showSearch = showSearch;
+	window.hideSearch = hideSearch;
+})();
+
+// ===== ZEN MODE & FOCUS MODE =====
+(function() {
+	let zenMode = false;
+	let focusMode = false;
+	
+	function toggleZenMode() {
+		zenMode = !zenMode;
+		document.body.classList.toggle('zen-mode', zenMode);
+		console.log('Zen mode:', zenMode);
+	}
+	
+	function toggleFocusMode() {
+		focusMode = !focusMode;
+		document.body.classList.toggle('focus-mode', focusMode);
+		console.log('Focus mode:', focusMode);
+	}
+	
+	// Keyboard shortcuts
+	document.addEventListener('keydown', (e) => {
+		if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+			e.preventDefault();
+			showSearch();
+		}
+		if (e.ctrlKey && e.key === 'k' && e.shiftKey) {
+			e.preventDefault();
+			toggleZenMode();
+		}
+	});
+	
+	window.toggleZenMode = toggleZenMode;
+	window.toggleFocusMode = toggleFocusMode;
+	
+	console.log('✨ Search, Zen, Focus modes loaded');
+})();
+
+// Enhanced Multi-File Search with real functionality
+window.performSearch = async function() {
+	const query = document.getElementById('searchQuery')?.value;
+	const resultsDiv = document.getElementById('searchResults');
+	if (!query || !resultsDiv) return;
+	resultsDiv.innerHTML = '<div class="search-empty">🔍 Searching...</div>';
+	const isRegex = document.getElementById('searchRegex')?.checked;
+	const caseSensitive = document.getElementById('searchCase')?.checked;
+	try {
+		const tabs = window.openTabs || [];
+		const results = [];
+		for (const tab of tabs) {
+			if (!tab.path) continue;
+			const file = await window.bridge?.readFileByPath(tab.path);
+			if (!file || !file.content) continue;
+			const lines = file.content.split('\n');
+			lines.forEach((line, index) => {
+				const matches = caseSensitive ? line.includes(query) : line.toLowerCase().includes(query.toLowerCase());
+				if (matches) {
+					results.push({ file: tab.path, fileName: tab.path.split('/').pop(), line: index + 1, content: line.trim().substring(0, 100) });
+				}
+			});
+		}
+		if (results.length === 0) {
+			resultsDiv.innerHTML = '<div class="search-empty">❌ No results found</div>';
+		} else {
+			resultsDiv.innerHTML = results.map(r => `<div class="search-result-item" data-file="${r.file}" data-line="${r.line}"><div class="search-result-file">📄 ${r.fileName}</div><div class="search-result-line">Line ${r.line}: ${r.content}</div></div>`).join('');
+			document.querySelectorAll('.search-result-item').forEach(el => {
+				el.addEventListener('click', async function() {
+					const file = await window.bridge?.readFileByPath(this.dataset.file);
+					if (file && window.bargeOpenFileInTab) {
+						window.bargeOpenFileInTab(this.dataset.file, file.content);
+						setTimeout(() => {
+							if (window.editor) {
+								const line = parseInt(this.dataset.line);
+								window.editor.revealLineInCenter(line);
+								window.editor.setPosition({ lineNumber: line, column: 1 });
+							}
+						}, 100);
+					}
+					window.hideSearch?.();
+				});
+			});
+		}
+	} catch (err) {
+		console.error('Search error:', err);
+		resultsDiv.innerHTML = '<div class="search-empty">⚠️ Error searching files</div>';
+	}
+};
+console.log('✨ Multi-file search ready');
+
+// Add zen mode debugging
+window.addEventListener('keydown', (e) => {
+if (e.ctrlKey && e.key === 'k') {
+sole.log('Ctrl+K detected');
+}
+});
+
+// Override toggleZenMode with debugging
+const originalToggleZen = window.toggleZenMode;
+window.toggleZenMode = function() {
+console.log('toggleZenMode called');
+if (originalToggleZen) originalToggleZen();
+const isZen = document.body.classList.contains('zen-mode');
+console.log('Zen mode is now:', isZen);
+console.log('Editor element:', document.getElementById('editor'));
+console.log('Topbar element:', document.querySelector('.topbar'));
+console.log('Tabs element:', document.querySelector('.tabs'));
+};
+
+console.log('✨ Zen mode debugging enabled');
