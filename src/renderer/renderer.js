@@ -3888,7 +3888,8 @@ window.getCmdIcon = function(commandId) {
 	}
 
 	function handleContextAction(action, tabPath) {
-		const openTabs = window.openTabs || [];
+		// Create a snapshot to avoid mutation issues
+		const openTabs = window.openTabs ? [...window.openTabs] : [];
 		
 		switch (action) {
 			case 'close':
@@ -3898,9 +3899,10 @@ window.getCmdIcon = function(commandId) {
 				break;
 				
 			case 'close-others':
-				if (confirm('Close all other tabs?')) {
-					openTabs.forEach(tab => {
-						if (tab.path !== tabPath && window.__closeTab) {
+				const othersToClose = openTabs.filter(tab => tab.path !== tabPath);
+				if (othersToClose.length > 0 && confirm(`Close ${othersToClose.length} other tabs?`)) {
+					othersToClose.forEach(tab => {
+						if (window.__closeTab) {
 							window.__closeTab(tab.path);
 						}
 					});
@@ -3910,23 +3912,24 @@ window.getCmdIcon = function(commandId) {
 			case 'close-right':
 				const idx = openTabs.findIndex(t => t.path === tabPath);
 				if (idx >= 0 && idx < openTabs.length - 1) {
-					if (confirm(`Close ${openTabs.length - idx - 1} tabs to the right?`)) {
-						for (let i = openTabs.length - 1; i > idx; i--) {
+					const rightTabs = openTabs.slice(idx + 1);
+					if (confirm(`Close ${rightTabs.length} tabs to the right?`)) {
+						rightTabs.forEach(tab => {
 							if (window.__closeTab) {
-								window.__closeTab(openTabs[i].path);
+								window.__closeTab(tab.path);
 							}
-						}
+						});
 					}
 				}
 				break;
 				
 			case 'close-all':
-				if (confirm(`Close all ${openTabs.length} tabs? Any unsaved changes will be lost.`)) {
+				if (openTabs.length > 0 && confirm(`Close all ${openTabs.length} tabs? Any unsaved changes will be lost.`)) {
 					if (window.__closeAllTabs) {
 						window.__closeAllTabs();
 					} else {
-						// Fallback: close each tab
-						[...openTabs].forEach(tab => {
+						// Fallback: close each tab from the snapshot
+						openTabs.forEach(tab => {
 							if (window.__closeTab) {
 								window.__closeTab(tab.path);
 							}
