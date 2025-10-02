@@ -1883,13 +1883,6 @@ document.addEventListener('DOMContentLoaded', () => {
 					// tab activated
 					activateTab(filePath); 
 				}); 
-				// Tab context menu
-				tabEl.addEventListener('contextmenu', (e) => {
-					e.preventDefault();
-					e.stopPropagation();
-					const p = (e.currentTarget instanceof Element) ? (e.currentTarget.dataset?.path || filePath) : filePath;
-					showTabContextMenu(e.pageX, e.pageY, p);
-				}); 
 				tab._el = tabEl; 
 				tab._titleEl = titleEl; 
 				tabsEl.appendChild(tabEl); 
@@ -4003,6 +3996,8 @@ window.getCmdIcon = function(commandId) {
 })();
 
 // Fix: Use document-level delegation for tab context menu
+
+// Document-level event delegation for tab context menu (works with dynamic tabs)
 document.addEventListener('contextmenu', (e) => {
 const tab = e.target.closest('.tab');
 if (tab && window.showTabContextMenu) {
@@ -4011,4 +4006,4 @@ dow.showTabContextMenu(e, tab);
 }
 }, true);
 
-console.log('✨ Tab context menu fixed with document delegation');
+console.log('✨ Tab context menu document delegation enabled');
