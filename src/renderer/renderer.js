@@ -3691,3 +3691,123 @@ console.log('✨ Tab enhancements loaded');
 
 // end of renderer.js
 
+
+// ===== ENHANCED COMMAND PALETTE =====
+(function() {
+	let recentCommands = [];
+	const MAX_RECENT = 10;
+
+	// Load recent commands from localStorage
+	function loadRecentCommands() {
+		try {
+			const stored = localStorage.getItem('barge:recentCommands');
+			if (stored) recentCommands = JSON.parse(stored);
+		} catch {}
+	}
+
+	// Save recent commands to localStorage
+	function saveRecentCommands() {
+		try {
+			localStorage.setItem('barge:recentCommands', JSON.stringify(recentCommands.slice(0, MAX_RECENT)));
+		} catch {}
+	}
+
+	// Add command to recent list
+	function addToRecent(commandId) {
+		recentCommands = recentCommands.filter(id => id !== commandId);
+		recentCommands.unshift(commandId);
+		saveRecentCommands();
+	}
+
+	// Fuzzy search algorithm
+	function fuzzyMatch(pattern, str) {
+		pattern = pattern.toLowerCase();
+		str = str.toLowerCase();
+		
+		let patternIdx = 0;
+		let strIdx = 0;
+		let score = 0;
+		let consecutiveMatches = 0;
+		const matches = [];
+		
+		while (patternIdx < pattern.length && strIdx < str.length) {
+			if (pattern[patternIdx] === str[strIdx]) {
+				matches.push(strIdx);
+				consecutiveMatches++;
+				score += 1 + consecutiveMatches * 0.5;
+				patternIdx++;
+			} else {
+				consecutiveMatches = 0;
+			}
+			strIdx++;
+		}
+		
+		if (patternIdx !== pattern.length) return null;
+		if (matches[0] === 0) score += 10;
+		
+		for (let i = 1; i < matches.length; i++) {
+			const gap = matches[i] - matches[i - 1] - 1;
+			score -= gap * 0.1;
+		}
+		
+		return { score, matches };
+	}
+
+	window.recentCommands = recentCommands;
+	window.fuzzyFilterCommands = function(commands, query) {
+		if (!query) {
+			const recentIds = new Set(recentCommands);
+			const recent = commands.filter(cmd => recentIds.has(cmd.id));
+			const others = commands.filter(cmd => !recentIds.has(cmd.id));
+			return [...recent, ...others];
+		}
+		
+		const results = [];
+		for (const cmd of commands) {
+			const titleMatch = fuzzyMatch(query, cmd.title);
+			const idMatch = fuzzyMatch(query, cmd.id);
+			const hintMatch = cmd.hint ? fuzzyMatch(query, cmd.hint) : null;
+			const match = titleMatch || idMatch || hintMatch;
+			if (match) {
+				results.push({ ...cmd, score: match.score, matches: titleMatch?.matches || [] });
+			}
+		}
+		results.sort((a, b) => b.score - a.score);
+		return results;
+	};
+
+	window.highlightMatches = function(text, matches) {
+		if (!matches || matches.length === 0) return text;
+		let result = '';
+		let lastIdx = 0;
+		for (const idx of matches) {
+			result += text.slice(lastIdx, idx);
+			result += `<span class="cmd-match">${text[idx]}</span>`;
+			lastIdx = idx + 1;
+		}
+		result += text.slice(lastIdx);
+		return result;
+	};
+
+	const originalExecuteCmd = window.executeCmd;
+	if (originalExecuteCmd) {
+		window.executeCmd = function(cmd) {
+			if (cmd && cmd.id) addToRecent(cmd.id);
+			return originalExecuteCmd(cmd);
+		};
+	}
+
+	loadRecentCommands();
+	console.log('✨ Enhanced Command Palette loaded');
+})();
+
+window.getCmdIcon = function(commandId) {
+	const iconMap = {
+		'view:': '👁️', 'file:': '📄', 'edit:': '✏️', 'help:': '❓',
+		'window:': '🪟', 'terminal:': '⌨️', 'git:': '🔀', 'search:': '🔍'
+	};
+	for (const [prefix, icon] of Object.entries(iconMap)) {
+		if (commandId.startsWith(prefix)) return icon;
+	}
+	return '⚡';
+};
