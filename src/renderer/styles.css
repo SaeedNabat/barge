@@ -298,13 +298,56 @@ body.theme-light .breadcrumb-separator {
 .tabs { display: flex; gap: 6px; align-items: stretch; overflow: auto; background: transparent; }
 /* Make tab bar horizontally scrollable with no vertical overflow */
 .tabs { overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
-.tabs::-webkit-scrollbar { height: 14px; }
-.tabs::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.5); border-radius: 10px; }
-.tabs::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.7); }
-/* Firefox */
-.tabs { scrollbar-width: thin; }
-/* Reserve space so the scrollbar is not overlapped/clipped */
-.tabs { padding-bottom: 10px; scrollbar-gutter: stable both-edges; }
+/* Modern tabs scrollbar styling */
+.tabs::-webkit-scrollbar { 
+height: 8px;
+}
+.tabs::-webkit-scrollbar-track { 
+background: rgba(15, 17, 21, 0.4);
+border-radius: 8px;
+margin: 0 4px;
+}
+.tabs::-webkit-scrollbar-thumb { 
+background: linear-gradient(90deg, rgba(99, 102, 241, 0.6), rgba(147, 197, 253, 0.6));
+border-radius: 8px;
+border: 2px solid rgba(15, 17, 21, 0.4);
+transition: all 0.2s ease;
+box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+}
+.tabs::-webkit-scrollbar-thumb:hover { 
+background: linear-gradient(90deg, rgba(99, 102, 241, 0.8), rgba(147, 197, 253, 0.8));
+box-shadow: 0 2px 12px rgba(99, 102, 241, 0.35);
+border-color: rgba(15, 17, 21, 0.2);
+}
+.tabs::-webkit-scrollbar-thumb:active { 
+background: linear-gradient(90deg, #6366f1, #93c5fd);
+box-shadow: 0 2px 16px rgba(99, 102, 241, 0.5);
+}
+/* Firefox - modern scrollbar */
+.tabs { 
+scrollbar-width: thin;
+scrollbar-color: rgba(99, 102, 241, 0.6) rgba(15, 17, 21, 0.4);
+}
+/* Light theme tabs scrollbar */
+body.theme-light .tabs::-webkit-scrollbar-track {
+background: rgba(241, 245, 249, 0.8);
+}
+body.theme-light .tabs::-webkit-scrollbar-thumb {
+background: linear-gradient(90deg, rgba(59, 130, 246, 0.7), rgba(96, 165, 250, 0.7));
+border-color: rgba(241, 245, 249, 0.6);
+box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+}
+body.theme-light .tabs::-webkit-scrollbar-thumb:hover {
+background: linear-gradient(90deg, rgba(59, 130, 246, 0.9), rgba(96, 165, 250, 0.9));
+box-shadow: 0 2px 12px rgba(59, 130, 246, 0.35);
+}
+body.theme-light .tabs::-webkit-scrollbar-thumb:active {
+background: linear-gradient(90deg, #3b82f6, #60a5fa);
+box-shadow: 0 2px 16px rgba(59, 130, 246, 0.5);
+}
+body.theme-light .tabs {
+scrollbar-color: rgba(59, 130, 246, 0.7) rgba(241, 245, 249, 0.8);
+}
 /* Ensure tabs container can actually shrink and scroll within flex topbar */
 .tabs { flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; }
 /* Prevent individual tabs from shrinking so horizontal overflow occurs */
@@ -1782,4 +1825,533 @@ min-width: 0;
 #editor .monaco-editor, #editor2 .monaco-editor { 
 width: 100% !important; 
 height: 100% !important; 
+}
+
+/* ===== ENHANCED TABS WITH SMOOTH SCROLL ===== */
+.tabs {
+scroll-behavior: smooth;
+scroll-snap-type: x mandatory;
+-webkit-overflow-scrolling: touch;
+}
+
+.tab {
+scroll-snap-align: start;
+position: relative;
+overflow: visible;
+}
+
+/* Enhanced tab hover effect with scale */
+.tab {
+transform-origin: center bottom;
+transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), 
+            box-shadow 0.2s ease, 
+            border-color 0.2s ease,
+            background 0.2s ease;
+}
+
+.tab:hover {
+transform: translateY(-2px) scale(1.02);
+box-shadow: 0 6px 20px rgba(115, 112, 255, 0.25) inset,
+            0 4px 12px rgba(0, 199, 255, 0.15);
+z-index: 10;
+}
+
+.tab.active {
+transform: translateY(-1px);
+box-shadow: 0 8px 32px rgba(0, 199, 255, 0.3) inset,
+            0 6px 16px rgba(99, 102, 241, 0.2);
+z-index: 15;
+}
+
+.tab.active:hover {
+transform: translateY(-2px) scale(1.01);
+}
+
+/* Tab close button enhancement */
+.tab .close {
+opacity: 0;
+transition: opacity 0.2s ease, transform 0.2s ease, background 0.15s ease;
+}
+
+.tab:hover .close {
+opacity: 1;
+}
+
+.tab .close:hover {
+transform: rotate(90deg) scale(1.1);
+background: rgba(239, 68, 68, 0.2);
+}
+
+/* File type indicator dots */
+.tab::before {
+content: '';
+position: absolute;
+left: 8px;
+top: 50%;
+transform: translateY(-50%);
+width: 6px;
+height: 6px;
+border-radius: 50%;
+background: currentColor;
+opacity: 0.5;
+transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.tab.active::before {
+opacity: 1;
+transform: translateY(-50%) scale(1.2);
+box-shadow: 0 0 8px currentColor;
+}
+
+.tab[data-language="javascript"]::before,
+.tab[data-language="typescript"]::before {
+background: #f7df1e;
+}
+
+.tab[data-language="python"]::before {
+background: #3776ab;
+}
+
+.tab[data-language="html"]::before {
+background: #e34c26;
+}
+
+.tab[data-language="css"]::before {
+background: #264de4;
+}
+
+.tab[data-language="json"]::before {
+background: #5e9f36;
+}
+
+.tab[data-language="markdown"]::before {
+background: #ffffff;
+}
+
+/* Tab content spacing for indicator */
+.tab .title {
+margin-left: 12px;
+}
+
+/* Tab pulse animation on new tab */
+@keyframes tabPulse {
+0%, 100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+50% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3); }
+}
+
+.tab.new-tab {
+animation: tabPulse 0.6s ease-out;
+}
+
+/* Pinned tab indicator */
+.tab.pinned {
+min-width: 40px;
+padding: 0 12px;
+}
+
+.tab.pinned .title {
+display: none;
+}
+
+.tab.pinned::after {
+content: '📌';
+position: absolute;
+right: 6px;
+top: 50%;
+transform: translateY(-50%);
+font-size: 10px;
+opacity: 0.7;
+}
+
+/* ===== TAB CONTEXT MENU ===== */
+.tab-context-menu {
+position: fixed;
+min-width: 220px;
+background: linear-gradient(135deg, rgba(17, 21, 30, 0.98), rgba(13, 17, 25, 0.98));
+border: 1px solid rgba(153, 174, 206, 0.4);
+border-radius: 12px;
+padding: 6px;
+box-shadow: 0 24px 80px rgba(3, 8, 20, 0.7),
+            0 10px 32px rgba(99, 102, 241, 0.25),
+            0 0 0 1px rgba(147, 197, 253, 0.1) inset;
+opacity: 0;
+transform: scale(0.95) translateY(-8px);
+pointer-events: none;
+transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+            transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+z-index: 10000;
+backdrop-filter: blur(12px) saturate(120%);
+}
+
+.tab-context-menu.visible {
+opacity: 1;
+transform: scale(1) translateY(0);
+pointer-events: auto;
+}
+
+.tab-context-menu::before {
+content: '';
+position: absolute;
+inset: -1px;
+border-radius: 12px;
+padding: 1px;
+background: linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(147, 197, 253, 0.2));
+-webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+-webkit-mask-composite: xor;
+mask-composite: exclude;
+pointer-events: none;
+}
+
+.tab-context-item {
+display: flex;
+align-items: center;
+gap: 10px;
+padding: 10px 14px;
+border-radius: 8px;
+color: #e5e7eb;
+font-size: 13px;
+cursor: pointer;
+transition: all 0.15s ease;
+user-select: none;
+position: relative;
+overflow: hidden;
+}
+
+.tab-context-item::before {
+content: '';
+position: absolute;
+inset: 0;
+background: linear-gradient(90deg, rgba(99, 102, 241, 0.1), rgba(147, 197, 253, 0.1));
+opacity: 0;
+transition: opacity 0.15s ease;
+}
+
+.tab-context-item:hover::before {
+opacity: 1;
+}
+
+.tab-context-item:hover {
+background: rgba(99, 102, 241, 0.2);
+color: #ffffff;
+transform: translateX(2px);
+}
+
+.tab-context-item:active {
+background: rgba(99, 102, 241, 0.3);
+transform: translateX(0);
+}
+
+.tab-context-item .icon {
+width: 18px;
+height: 18px;
+display: flex;
+align-items: center;
+justify-content: center;
+font-size: 14px;
+}
+
+.tab-context-separator {
+height: 1px;
+margin: 6px 8px;
+background: linear-gradient(90deg, transparent, rgba(148, 163, 184, 0.3), transparent);
+}
+
+.tab-context-item.danger:hover {
+background: rgba(239, 68, 68, 0.2);
+color: #fca5a5;
+}
+
+.tab-context-item.danger .icon {
+color: #ef4444;
+}
+
+/* Light theme */
+body.theme-light .tab-context-menu {
+background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+border-color: rgba(0, 0, 0, 0.15);
+box-shadow: 0 24px 80px rgba(0, 0, 0, 0.15),
+            0 10px 32px rgba(59, 130, 246, 0.15);
+}
+
+body.theme-light .tab-context-item {
+color: #1e293b;
+}
+
+body.theme-light .tab-context-item:hover {
+background: rgba(59, 130, 246, 0.15);
+color: #0f172a;
+}
+
+/* ===== FILE ICONS IN TREE ===== */
+
+.file-tree .item[data-type="file"]::before {
+content: '📄';
+}
+
+.file-tree .item[data-ext="js"]::before,
+.file-tree .item[data-ext="mjs"]::before {
+content: '🟨';
+}
+
+.file-tree .item[data-ext="ts"]::before,
+.file-tree .item[data-ext="tsx"]::before {
+content: '🔷';
+}
+
+.file-tree .item[data-ext="py"]::before {
+content: '🐍';
+}
+
+.file-tree .item[data-ext="html"]::before {
+content: '🌐';
+}
+
+.file-tree .item[data-ext="css"]::before,
+.file-tree .item[data-ext="scss"]::before {
+content: '🎨';
+}
+
+.file-tree .item[data-ext="json"]::before {
+content: '📋';
+}
+
+.file-tree .item[data-ext="md"]::before {
+content: '📝';
+}
+
+.file-tree .item[data-ext="png"]::before,
+.file-tree .item[data-ext="jpg"]::before,
+.file-tree .item[data-ext="svg"]::before {
+content: '🖼️';
+}
+
+.file-tree .item[data-ext="git"]::before,
+.file-tree .item[data-ext="gitignore"]::before {
+content: '⚙️';
+}
+
+.file-tree .item[data-type="dir"]::before {
+content: '📁';
+}
+
+.file-tree .item[data-type="dir"].expanded::before {
+content: '📂';
+}
+
+/* ===== PERFORMANCE OPTIMIZATIONS ===== */
+* {
+-webkit-font-smoothing: antialiased;
+-moz-osx-font-smoothing: grayscale;
+}
+
+.tab, .file-tree .item, .menu-item {
+will-change: transform;
+backface-visibility: hidden;
+-webkit-backface-visibility: hidden;
+}
+
+/* Hardware acceleration for smooth animations */
+.sidebar, .terminal, .modal-card, .tab-context-menu {
+transform: translateZ(0);
+-webkit-transform: translateZ(0);
+}
+
+/* ===== BEAUTIFUL LOADING STATES ===== */
+@keyframes shimmer {
+0% { background-position: -1000px 0; }
+100% { background-position: 1000px 0; }
+}
+
+.loading-skeleton {
+background: linear-gradient(90deg, 
+163, 184, 0.1) 0%,
+163, 184, 0.2) 50%,
+163, 184, 0.1) 100%);
+background-size: 1000px 100%;
+animation: shimmer 2s infinite;
+}
+
+/* ===== BEAUTIFUL FOCUS STATES ===== */
+.tab:focus-visible,
+.file-tree .item:focus-visible,
+.menu-item:focus-visible {
+outline: 2px solid rgba(99, 102, 241, 0.6);
+outline-offset: 2px;
+border-radius: 8px;
+}
+
+/* ===== SMOOTH TRANSITIONS FOR EVERYTHING ===== */
+.sidebar, .terminal, .statusbar, .topbar {
+transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ===== GLASS MORPHISM EFFECTS ===== */
+.topbar, .menubar, .statusbar {
+backdrop-filter: blur(12px) saturate(120%);
+-webkit-backdrop-filter: blur(12px) saturate(120%);
+}
+
+/* ===== BEAUTIFUL GLOW EFFECTS ===== */
+.tab.active::after {
+content: '';
+position: absolute;
+inset: 0;
+background: radial-gradient(circle at center, rgba(99, 102, 241, 0.15), transparent 70%);
+pointer-events: none;
+opacity: 0;
+animation: glow 3s ease-in-out infinite;
+}
+
+@keyframes glow {
+0%, 100% { opacity: 0; }
+50% { opacity: 1; }
+}
+
+/* ===== CURSOR ENHANCEMENTS ===== */
+.tab, .file-tree .item, .menu-item, button {
+cursor: pointer;
+position: relative;
+}
+
+.tab:hover, .file-tree .item:hover, .menu-item:hover {
+cursor: pointer;
+}
+
+/* Custom cursor trail (optional - can be enabled) */
+.cursor-trail {
+position: fixed;
+width: 20px;
+height: 20px;
+border-radius: 50%;
+background: radial-gradient(circle, rgba(99, 102, 241, 0.3), transparent);
+pointer-events: none;
+z-index: 9999;
+transition: transform 0.1s ease;
+}
+
+/* ===== BEAUTIFUL SELECTION HIGHLIGHT ===== */
+::selection {
+background: rgba(99, 102, 241, 0.3);
+color: #ffffff;
+}
+
+::-moz-selection {
+background: rgba(99, 102, 241, 0.3);
+color: #ffffff;
+}
+
+body.theme-light ::selection {
+background: rgba(59, 130, 246, 0.3);
+color: #0f172a;
+}
+
+/* ===== IMPROVED SHADOWS ===== */
+.tab.active, .file-tree .item.selected {
+box-shadow: 0 8px 32px rgba(0, 199, 255, 0.25) inset,
+            0 2px 8px rgba(99, 102, 241, 0.15),
+            0 0 0 1px rgba(147, 197, 253, 0.3);
+}
+
+/* ===== TOPBAR BREADCRUMB ENHANCEMENT ===== */
+.breadcrumb {
+position: relative;
+padding: 6px 12px;
+background: rgba(99, 102, 241, 0.08);
+border-radius: 8px;
+border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.breadcrumb::before {
+content: '';
+position: absolute;
+left: 0;
+top: 50%;
+transform: translateY(-50%);
+width: 3px;
+height: 60%;
+background: linear-gradient(180deg, #6366f1, #3b82f6);
+border-radius: 0 2px 2px 0;
+}
+
+.breadcrumb-item {
+font-weight: 500;
+letter-spacing: 0.02em;
+}
+
+/* ===== FILE TREE ENHANCEMENTS ===== */
+.file-tree .item {
+position: relative;
+transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.file-tree .item:hover {
+transform: translateX(4px);
+background: linear-gradient(90deg, rgba(99, 102, 241, 0.1), rgba(99, 102, 241, 0.05));
+}
+
+.file-tree .item.selected {
+background: linear-gradient(90deg, rgba(96, 165, 250, 0.2), rgba(96, 165, 250, 0.1));
+border-left: 3px solid #60a5fa;
+padding-left: 5px;
+}
+
+/* ===== STATUSBAR ENHANCEMENTS ===== */
+.statusbar > * {
+transition: all 0.2s ease;
+padding: 2px 8px;
+border-radius: 4px;
+}
+
+.statusbar > *:hover {
+background: rgba(99, 102, 241, 0.1);
+cursor: default;
+}
+
+#cursorPos {
+font-variant-numeric: tabular-nums;
+font-weight: 600;
+color: #60a5fa;
+}
+
+/* ===== MINIMAP BUTTON ENHANCEMENT ===== */
+#toggleMinimap {
+position: relative;
+overflow: visible;
+}
+
+#toggleMinimap::after {
+content: '';
+position: absolute;
+inset: -2px;
+border-radius: 10px;
+background: conic-gradient(from 0deg, #6366f1, #3b82f6, #6366f1);
+opacity: 0;
+z-index: -1;
+transition: opacity 0.3s ease;
+animation: rotate 3s linear infinite;
+}
+
+#toggleMinimap.active::after {
+opacity: 0.3;
+}
+
+@keyframes rotate {
+from { transform: rotate(0deg); }
+to { transform: rotate(360deg); }
+}
+
+/* ===== ACCESSIBILITY IMPROVEMENTS ===== */
+@media (prefers-reduced-motion: reduce) {
+*, *::before, *::after {
+imation-duration: 0.01ms !important;
+imation-iteration-count: 1 !important;
+sition-duration: 0.01ms !important;
+}
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+.tab, .file-tree .item, .menu-item {
+2px solid currentColor;
+}
 }

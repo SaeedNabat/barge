@@ -1608,10 +1608,15 @@ document.addEventListener('DOMContentLoaded', () => {
 			el.className = 'item';
 			el.dataset.path = node.path || '';
 			el.dataset.type = node.type || '';
-			el.innerHTML = `${iconSvg(node.type, node.name)} <span class="label">${node.name}</span>`;
+			// Add file extension for CSS icon selection
+			if (node.type === 'file') {
+				const ext = node.name.split('.').pop()?.toLowerCase();
+				if (ext) el.dataset.ext = ext;
+			}
+			el.innerHTML = `<span class="label">${node.name}</span>`;
 			el.draggable = true;
 			if (node.type === 'dir') {
-				el.innerHTML = `${iconSvg('dir', node.name)} <span class="label">${node.name}</span>`;
+				el.innerHTML = `<span class="label">${node.name}</span>`;
 				// Check if folder has children
 				const hasKids = (Array.isArray(node.children) && node.children.length > 0) || !!node.hasChildren;
 				let caret = null;
@@ -3652,4 +3657,37 @@ async function ensureXtermLoaded() {
 		}
 }
 
+
+// ===== TAB ENHANCEMENTS =====
+if (typeof window.enhanceTabRendering === 'undefined') {
+	window.enhanceTabRendering = function() {
+		const tabs = document.querySelectorAll('.tab');
+		tabs.forEach(tab => {
+			const path = tab.dataset.path;
+			if (!path) return;
+			const ext = path.split('.').pop().toLowerCase();
+			const langMap = {
+				'js': 'javascript', 'ts': 'typescript', 'py': 'python',
+				'html': 'html', 'css': 'css', 'json': 'json', 'md': 'markdown'
+			};
+			tab.dataset.language = langMap[ext] || 'plaintext';
+			if (!tab.classList.contains('rendered')) {
+				tab.classList.add('new-tab', 'rendered');
+				setTimeout(() => tab.classList.remove('new-tab'), 600);
+			}
+		});
+	};
+	const tabsContainer = document.getElementById('tabs');
+	if (tabsContainer) {
+		const observer = new MutationObserver(() => window.enhanceTabRendering?.());
+		observer.observe(tabsContainer, { childList: true, subtree: true });
+	}
+}
+window.scrollToActiveTab = function() {
+	const activeTab = document.querySelector('.tab.active');
+	if (activeTab) activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+};
+console.log('✨ Tab enhancements loaded');
+
 // end of renderer.js
+
