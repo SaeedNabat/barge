@@ -19,15 +19,7 @@ if (!window.__MONACO_CONFIGURED__) {
 			? new URL('./node_modules/monaco-editor/min/', document.baseURI).toString()
 			: new URL('../../node_modules/monaco-editor/min/', document.baseURI).toString());
 	if (window.require && window.require.config) {
-		require.config({ 
-			paths: { vs: monacoBaseUrl + 'vs' },
-			// Optimize worker loading - only load necessary workers
-			'vs/editor/editor.worker': monacoBaseUrl + 'vs/editor/editor.worker.js',
-			'vs/language/json/json.worker': monacoBaseUrl + 'vs/language/json/json.worker.js',
-			'vs/language/css/css.worker': monacoBaseUrl + 'vs/language/css/css.worker.js',
-			'vs/language/html/html.worker': monacoBaseUrl + 'vs/language/html/html.worker.js',
-			'vs/language/typescript/ts.worker': monacoBaseUrl + 'vs/language/typescript/ts.worker.js'
-		});
+		require.config({ paths: { vs: monacoBaseUrl + 'vs' } });
 	}
 	
 	// Optimized worker environment - only create workers when needed
@@ -571,7 +563,11 @@ function updateEmptyState() {
 	
 	// Show sidebar welcome buttons when no workspace is open
 	if (sidebarWelcome) {
-		sidebarWelcome.style.display = currentWorkspaceRoot ? 'none' : 'block';
+		if (currentWorkspaceRoot) {
+			sidebarWelcome.classList.add('hidden');
+		} else {
+			sidebarWelcome.classList.remove('hidden');
+		}
 	}
 	
 	// Also update editor enabled state whenever empty state changes
@@ -581,9 +577,9 @@ function updateEmptyState() {
 	const fileTreeFilterWrap = document.querySelector('.file-tree-filter');
 	if (fileTreeFilterWrap) {
 		if (currentWorkspaceRoot) {
-			fileTreeFilterWrap.style.display = 'block';
+			fileTreeFilterWrap.classList.remove('hidden');
 		} else {
-			fileTreeFilterWrap.style.display = 'none';
+			fileTreeFilterWrap.classList.add('hidden');
 			const inp = document.getElementById('fileTreeFilter');
 			if (inp) inp.value = '';
 			// Clear any filtering
@@ -920,7 +916,7 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 	safeBind(mEditRedo, 'click', () => { editor?.trigger('menu', 'redo', null); });
 	safeBind(mEditPreferences, 'click', () => { if (typeof openPrefs === 'function') openPrefs(); else setTimeout(() => openPrefs?.(), 100); });
 	safeBind(mViewToggleStatus, 'click', () => { settings.statusBarVisible = !settings.statusBarVisible; saveSettings(); applySettings(); });
- safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.classList.toggle('sidebar-hidden'); saveSettings(); });
+ safeBind(mViewToggleSidebar, 'click', () => { document.querySelector('.app')?.classList.toggle('sidebar-hidden'); saveSettings(); requestAnimationFrame(() => window.forceEditorLayout?.()); setTimeout(() => window.forceEditorLayout?.(), 100); setTimeout(() => window.forceEditorLayout?.(), 250); });
 
 	function openPrefs() {
 		if (prefTheme) prefTheme.value = settings.theme || 'dark';
@@ -2744,24 +2740,33 @@ document.addEventListener('DOMContentLoaded', () => {
 							const size = { width: Math.max(0, el.clientWidth), height: Math.max(0, el.clientHeight) };
 							if (editor) editor.layout(size);
 							if (editor2Instance) editor2Instance.layout(size);
+						// Also resize active terminal if visible
+						try {
+							const termPanel = document.getElementById('terminalPanel');
+							if (termPanel && !termPanel.classList.contains('hidden') && window.termId) {
+								window.applyTerminalResizeFor?.(window.termId);
+							}
+						} catch {}
 						} finally {
 							relayoutPending = false;
 						}
 					}
 					function scheduleRelayout() {
-						if (relayoutPending) { clearTimeout(relayoutTimer); relayoutTimer = setTimeout(() => requestAnimationFrame(doLayout), 100); return; }
+						if (relayoutPending) { clearTimeout(relayoutTimer); relayoutTimer = setTimeout(() => requestAnimationFrame(doLayout), 16); return; }
 						relayoutPending = true;
-						relayoutTimer = setTimeout(() => requestAnimationFrame(doLayout), 100);
+						relayoutTimer = setTimeout(() => requestAnimationFrame(doLayout), 16);
 					}
  
  					// Observe container size changes
  					const ro = new ResizeObserver(() => scheduleRelayout());
  					ro.observe(editorContainer);
  					// Window resize fallback
- 					window.addEventListener('resize', scheduleRelayout);
+ 					window.addEventListener('resize', () => { scheduleRelayout(); requestAnimationFrame(() => doLayout()); });
  					// Initial post-init relayouts
  					scheduleRelayout();
  					setTimeout(scheduleRelayout, 120);
+				// Expose global relayout function for external triggers
+				window.forceEditorLayout = () => doLayout();
  				} catch {}
 
 				// Process any pending files now that Monaco is ready

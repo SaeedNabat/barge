@@ -1,3 +1,17 @@
+/* Base styles - prevent scrollbars on main window */
+html, body {
+	margin: 0;
+	padding: 0;
+	overflow: hidden;
+	height: 100%;
+	width: 100%;
+}
+
+/* Global utility class */
+.hidden {
+	display: none !important;
+}
+
 /* Animation foundation */
 :root {
 	--ease-emph: cubic-bezier(.2, .8, .2, 1);
@@ -81,7 +95,13 @@
 	transition: grid-template-columns .18s ease-in-out;
 	grid-template-columns: 0 1fr;
 }
-.app.sidebar-hidden .sidebar { width: 0; opacity: 0; overflow: hidden; pointer-events: none; }
+.app.sidebar-hidden .sidebar { 
+	width: 0; 
+	min-width: 0;
+	opacity: 0; 
+	overflow: hidden; 
+	pointer-events: none;
+}
 
 
 .sidebar {
@@ -95,6 +115,12 @@
 	transition: width .18s ease-in-out, opacity .14s ease-in-out;
 	position: relative;
 	z-index: 4000;
+	overflow: hidden;
+}
+
+/* Hide sidebar children only when sidebar itself is collapsed */
+.app.sidebar-hidden .sidebar > * {
+	display: none !important;
 }
 
 .file-tree {
@@ -322,7 +348,13 @@ body.theme-light .breadcrumb-separator {
 }
 .tab.closing { animation: tabCloseShrink 70ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards; pointer-events: none; }
 
-.actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.actions { 
+	display: flex; 
+	align-items: center; 
+	gap: 8px; 
+	flex-shrink: 0;
+	margin-left: auto;
+}
 #filename { display: none; }
 
 .actions button {
@@ -332,9 +364,43 @@ body.theme-light .breadcrumb-separator {
 	padding: 6px 10px;
 	border-radius: 8px;
 	cursor: pointer;
-	transition: background .15s ease, transform .1s ease;
+	transition: background .15s ease, transform .1s ease, border-color .15s ease, box-shadow .15s ease;
+	flex-shrink: 0;
 }
 .actions button:hover { background: rgba(42, 48, 71, 0.9); transform: translateY(-1px); }
+
+/* Toggle minimap button active state */
+.actions button.active {
+	background: rgba(99, 102, 241, 0.25);
+	border-color: rgba(147, 197, 253, 0.45);
+	color: #93c5fd;
+	box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+}
+.actions button.active:hover {
+	background: rgba(99, 102, 241, 0.35);
+	box-shadow: 0 0 16px rgba(99, 102, 241, 0.4);
+}
+
+/* Light theme for actions buttons */
+body.theme-light .actions button {
+	background: rgba(248, 250, 252, 0.9);
+	color: #475569;
+	border-color: rgba(203, 213, 225, 0.6);
+}
+body.theme-light .actions button:hover {
+	background: rgba(241, 245, 249, 1);
+	border-color: rgba(147, 197, 253, 0.5);
+}
+body.theme-light .actions button.active {
+	background: rgba(59, 130, 246, 0.15);
+	border-color: rgba(59, 130, 246, 0.5);
+	color: #2563eb;
+	box-shadow: 0 0 12px rgba(59, 130, 246, 0.25);
+}
+body.theme-light .actions button.active:hover {
+	background: rgba(59, 130, 246, 0.25);
+	box-shadow: 0 0 16px rgba(59, 130, 246, 0.35);
+}
 
 #editor { position: relative; min-height: 0; }
 
@@ -533,12 +599,63 @@ body.theme-light .result-file { color: #2563eb; }
 
 body.theme-light .result-highlight { background: rgba(250, 204, 21, 0.25); border-bottom-color: rgba(250, 204, 21, 0.6); } 
 
-.sidebar-toolbar { display: flex; gap: 6px; align-items: center; padding: 8px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-.icon-btn { background: rgba(26,31,45,0.7); color: #e5e7eb; border: 1px solid rgba(82,97,126,0.6); width: 34px; height: 34px; border-radius: 9px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: transform .08s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease; }
-.icon-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(99,102,241,0.18); border-color: rgba(138,180,255,0.55); }
+.sidebar-toolbar { 
+	display: flex; 
+	gap: 8px; 
+	align-items: center; 
+	padding: 12px 8px; 
+	border-bottom: 1px solid rgba(255,255,255,0.06);
+	flex-shrink: 0;
+	min-width: 0;
+	overflow: hidden;
+}
+
+/* Modern toolbar buttons with text labels */
+.toolbar-btn {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 8px 12px;
+	background: rgba(59, 130, 246, 0.1);
+	color: #e5e7eb;
+	border: 1px solid rgba(59, 130, 246, 0.3);
+	border-radius: 8px;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 500;
+	transition: all 0.2s ease;
+}
+
+.toolbar-btn:hover {
+	background: rgba(59, 130, 246, 0.2);
+	border-color: rgba(59, 130, 246, 0.5);
+	transform: translateY(-1px);
+	box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+.toolbar-btn:active {
+	transform: translateY(0);
+}
+
+.toolbar-btn svg {
+	flex-shrink: 0;
+}
+
+.toolbar-btn span {
+	white-space: nowrap;
+}
+
 body.theme-light .sidebar-toolbar { border-bottom-color: rgba(0,0,0,0.06); }
-body.theme-light .icon-btn { background: rgba(255,255,255,0.9); color: #0f172a; border-color: rgba(0,0,0,0.12); }
-body.theme-light .icon-btn:hover { box-shadow: 0 8px 24px rgba(59,130,246,0.18); border-color: rgba(59,130,246,0.45); } 
+body.theme-light .toolbar-btn {
+	background: rgba(59, 130, 246, 0.08);
+	color: #1e293b;
+	border-color: rgba(59, 130, 246, 0.25);
+}
+body.theme-light .toolbar-btn:hover {
+	background: rgba(59, 130, 246, 0.15);
+	border-color: rgba(59, 130, 246, 0.4);
+	box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+} 
 
 .icon-btn.accent { color: #60a5fa; border-color: rgba(147,197,253,0.55); }
 .icon-btn.accent:hover { box-shadow: 0 8px 24px rgba(96,165,250,0.25); }
@@ -1387,13 +1504,34 @@ body.theme-light #qoEmpty { color: #64748b; }
 #editor.disabled .monaco-editor { opacity: .0; filter: grayscale(10%); display: none; }
 #editor2.disabled .monaco-editor { opacity: .0; filter: grayscale(10%); display: none; }
 
-.file-tree-filter { padding: 6px 6px 8px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; gap: 6px; justify-content: center; }
-.file-tree-filter input { flex: 1; max-width: 200px; background: rgba(20,24,33,0.6); color: #e5e7eb; border: 1px solid rgba(148,163,184,0.22); border-radius: 8px; padding: 6px 10px; outline: none; transition: border-color var(--dur-short) var(--ease-standard), box-shadow var(--dur-short) var(--ease-standard); }
+.file-tree-filter { 
+	padding: 10px 8px; 
+	border-top: 1px solid rgba(255,255,255,0.06);
+	flex-shrink: 0;
+	min-width: 0;
+}
+.file-tree-filter input { 
+	width: 100%;
+	box-sizing: border-box;
+	background: rgba(20,24,33,0.6); 
+	color: #e5e7eb; 
+	border: 1px solid rgba(148,163,184,0.22); 
+	border-radius: 8px; 
+	padding: 10px 12px;
+	font-size: 13px;
+	outline: none; 
+	transition: border-color var(--dur-short) var(--ease-standard), box-shadow var(--dur-short) var(--ease-standard);
+	min-width: 0;
+}
 .file-tree-filter input::placeholder { color: #94a3b8; }
-.file-tree-filter input:focus { border-color: rgba(147,197,253,0.55); box-shadow: 0 6px 18px rgba(99,102,241,0.18); }
-.file-tree-filter .icon-btn { flex-shrink: 0; }
+.file-tree-filter input:focus { 
+	border-color: rgba(147,197,253,0.55); 
+	box-shadow: 0 6px 18px rgba(99,102,241,0.18);
+	background: rgba(20,24,33,0.8);
+}
 body.theme-light .file-tree-filter input { background: rgba(255,255,255,0.9); color: #0f172a; border-color: rgba(0,0,0,0.12); }
 body.theme-light .file-tree-filter input::placeholder { color: #64748b; }
+body.theme-light .file-tree-filter input:focus { background: rgba(255,255,255,1); }
 .file-tree .filtered-out { display: none; }
 
 #editor { position: relative; min-height: 0; }
@@ -1528,6 +1666,42 @@ body.theme-light .statusbar .eol:hover {
 #editor .monaco-editor .overflow-guard, #editor2 .monaco-editor .overflow-guard { height: 100% !important; }
 #editor .monaco-scrollable-element, #editor2 .monaco-scrollable-element { height: 100% !important; }
 
+/* Minimap toggle animation and position fix */
+.monaco-editor .minimap {
+	position: absolute !important;
+	right: 0 !important;
+	top: 0 !important;
+	height: 100% !important;
+	z-index: 10 !important;
+	transition: opacity var(--dur-medium) var(--ease-emph), 
+	            transform var(--dur-medium) var(--ease-emph),
+	            width var(--dur-medium) var(--ease-emph) !important;
+}
+
+.monaco-editor .minimap.hidden {
+	opacity: 0 !important;
+	transform: translateX(20px) scale(0.95) !important;
+	pointer-events: none !important;
+}
+
+.monaco-editor .minimap-slider {
+	transition: background var(--dur-short) var(--ease-standard) !important;
+}
+
+/* Minimap decorations fade animation */
+.monaco-editor .minimap-decorations-layer {
+	transition: opacity var(--dur-short) var(--ease-standard) !important;
+}
+
+/* Ensure minimap shadow container is properly positioned */
+.monaco-editor .minimap-shadow-hidden,
+.monaco-editor .minimap-shadow-visible {
+	position: absolute !important;
+	right: 0 !important;
+	top: 0 !important;
+	height: 100% !important;
+}
+
 /* Floating Action Button */
 .fab {
 	position: fixed;
@@ -1597,3 +1771,15 @@ body.theme-dark .fab:active {
 
 /* Hide Split/Unsplit menu items */
 #mViewSplit, #mViewUnsplit { display: none !important; }
+
+/* Fix editor responsiveness when sidebar toggles */
+#editor, #editor2 { 
+width: 100% !important; 
+height: 100%; 
+min-height: 0; 
+min-width: 0;
+}
+#editor .monaco-editor, #editor2 .monaco-editor { 
+width: 100% !important; 
+height: 100% !important; 
+}

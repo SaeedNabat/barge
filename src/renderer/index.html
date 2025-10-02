@@ -88,20 +88,22 @@
 			<div class="app">
 				<aside class="sidebar">
 					<div class="sidebar-toolbar">
-						<button id="sidebarNewFile" title="New File" class="icon-btn accent" aria-label="New File">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<path d="M14 2H8a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8z"/>
-								<path d="M14 2v6h6"/>
-								<path d="M12 11v6"/>
-								<path d="M9 14h6"/>
+						<button id="sidebarNewFile" title="New File" class="toolbar-btn" aria-label="New File">
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+								<polyline points="14 2 14 8 20 8"/>
+								<line x1="12" y1="18" x2="12" y2="12"/>
+								<line x1="9" y1="15" x2="15" y2="15"/>
 							</svg>
+							<span>New File</span>
 						</button>
-						<button id="sidebarNewFolder" title="New Folder" class="icon-btn" aria-label="New Folder">
-							<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-								<path d="M3 7h5l2 2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
-								<path d="M12 13v6"/>
-								<path d="M9 16h6"/>
+						<button id="sidebarNewFolder" title="New Folder" class="toolbar-btn" aria-label="New Folder">
+							<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+								<line x1="12" y1="11" x2="12" y2="17"/>
+								<line x1="9" y1="14" x2="15" y2="14"/>
 							</svg>
+							<span>New Folder</span>
 						</button>
 					</div>
 					<div id="sidebarWelcome" class="sidebar-welcome" style="display:none">
