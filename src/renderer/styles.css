@@ -2653,3 +2653,19 @@ sform: translateY(0) scale(1);
 #cmdModal .modal-card {
 animation: cmdSlideIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+/* Pulse animation for revealed items */
+@keyframes pulse {
+0%, 100% {
+d: rgba(96, 165, 250, 0.2);
+sform: scale(1);
+}
+50% {
+d: rgba(96, 165, 250, 0.4);
+sform: scale(1.02);
+}
+}
+
+.file-tree .item.pulsing {
+animation: pulse 0.5s ease-in-out 2;
+}

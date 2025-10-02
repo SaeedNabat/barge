@@ -3811,3 +3811,204 @@ window.getCmdIcon = function(commandId) {
 	}
 	return '⚡';
 };
+
+// ===== TAB CONTEXT MENU IMPLEMENTATION =====
+(function() {
+	let contextMenu = null;
+	let contextMenuTarget = null;
+
+	function createContextMenu() {
+		if (contextMenu) return contextMenu;
+		
+		contextMenu = document.createElement('div');
+		contextMenu.className = 'tab-context-menu';
+		contextMenu.innerHTML = `
+			<div class="tab-context-item" data-action="close">
+				<span class="icon">✕</span>
+				<span>Close Tab</span>
+			</div>
+			<div class="tab-context-item" data-action="close-others">
+				<span class="icon">⊗</span>
+				<span>Close Other Tabs</span>
+			</div>
+			<div class="tab-context-item" data-action="close-right">
+				<span class="icon">→</span>
+				<span>Close Tabs to the Right</span>
+			</div>
+			<div class="tab-context-separator"></div>
+			<div class="tab-context-item" data-action="copy-path">
+				<span class="icon">📋</span>
+				<span>Copy Path</span>
+			</div>
+			<div class="tab-context-item" data-action="reveal">
+				<span class="icon">📂</span>
+				<span>Reveal in File Tree</span>
+			</div>
+			<div class="tab-context-separator"></div>
+			<div class="tab-context-item danger" data-action="close-all">
+				<span class="icon">🗑️</span>
+				<span>Close All Tabs</span>
+			</div>
+		`;
+		
+		document.body.appendChild(contextMenu);
+		
+		contextMenu.addEventListener('click', (e) => {
+			const item = e.target.closest('.tab-context-item');
+			if (!item || !contextMenuTarget) return;
+			
+			const action = item.dataset.action;
+			const tabPath = contextMenuTarget.dataset.path;
+			
+			handleContextAction(action, tabPath);
+			hideContextMenu();
+		});
+		
+		document.addEventListener('click', (e) => {
+			if (!contextMenu.contains(e.target) && !e.target.closest('.tab')) {
+				hideContextMenu();
+			}
+		});
+		
+		return contextMenu;
+	}
+
+	function showContextMenu(e, tab) {
+		e.preventDefault();
+		
+		const menu = createContextMenu();
+		contextMenuTarget = tab;
+		
+		const x = Math.min(e.clientX, window.innerWidth - 240);
+		const y = Math.min(e.clientY, window.innerHeight - 300);
+		
+		menu.style.left = x + 'px';
+		menu.style.top = y + 'px';
+		menu.classList.add('visible');
+	}
+
+	function hideContextMenu() {
+		if (contextMenu) {
+			contextMenu.classList.remove('visible');
+		}
+		contextMenuTarget = null;
+	}
+
+	function handleContextAction(action, tabPath) {
+		const openTabs = window.openTabs || [];
+		
+		switch (action) {
+			case 'close':
+				if (window.__closeTab) {
+					window.__closeTab(tabPath);
+				}
+				break;
+				
+			case 'close-others':
+				if (confirm('Close all other tabs?')) {
+					openTabs.forEach(tab => {
+						if (tab.path !== tabPath && window.__closeTab) {
+							window.__closeTab(tab.path);
+						}
+					});
+				}
+				break;
+				
+			case 'close-right':
+				const idx = openTabs.findIndex(t => t.path === tabPath);
+				if (idx >= 0 && idx < openTabs.length - 1) {
+					if (confirm(`Close ${openTabs.length - idx - 1} tabs to the right?`)) {
+						for (let i = openTabs.length - 1; i > idx; i--) {
+							if (window.__closeTab) {
+								window.__closeTab(openTabs[i].path);
+							}
+						}
+					}
+				}
+				break;
+				
+			case 'close-all':
+				if (confirm(`Close all ${openTabs.length} tabs? Any unsaved changes will be lost.`)) {
+					if (window.__closeAllTabs) {
+						window.__closeAllTabs();
+					} else {
+						// Fallback: close each tab
+						[...openTabs].forEach(tab => {
+							if (window.__closeTab) {
+								window.__closeTab(tab.path);
+							}
+						});
+					}
+				}
+				break;
+				
+			case 'copy-path':
+				if (navigator.clipboard) {
+					navigator.clipboard.writeText(tabPath).then(() => {
+						console.log('Path copied:', tabPath);
+					}).catch(err => {
+						console.error('Failed to copy path:', err);
+					});
+				}
+				break;
+				
+			case 'reveal':
+				const treeItem = document.querySelector(`.file-tree .item[data-path="${tabPath}"]`);
+				if (treeItem) {
+					treeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+					treeItem.classList.add('selected');
+					setTimeout(() => {
+						treeItem.style.animation = 'none';
+						setTimeout(() => {
+							treeItem.style.animation = 'pulse 0.5s ease-in-out 2';
+						}, 10);
+					}, 100);
+				}
+				break;
+		}
+	}
+
+	// Attach context menu to tabs on load
+	document.addEventListener('DOMContentLoaded', () => {
+		setTimeout(() => {
+			const tabsContainer = document.getElementById('tabs');
+			if (tabsContainer) {
+				tabsContainer.addEventListener('contextmenu', (e) => {
+					const tab = e.target.closest('.tab');
+					if (tab) {
+						showContextMenu(e, tab);
+					}
+				});
+			}
+		}, 1000);
+	});
+
+	// Also try after Monaco is ready
+	window.addEventListener('barge:monaco-ready', () => {
+		const tabsContainer = document.getElementById('tabs');
+		if (tabsContainer) {
+			tabsContainer.addEventListener('contextmenu', (e) => {
+				const tab = e.target.closest('.tab');
+				if (tab) {
+					showContextMenu(e, tab);
+				}
+			});
+		}
+	});
+
+	window.showTabContextMenu = showContextMenu;
+	window.hideTabContextMenu = hideContextMenu;
+	
+	console.log('✨ Tab Context Menu loaded');
+})();
+
+// Fix: Use document-level delegation for tab context menu
+document.addEventListener('contextmenu', (e) => {
+const tab = e.target.closest('.tab');
+if (tab && window.showTabContextMenu) {
+tDefault();
+dow.showTabContextMenu(e, tab);
+}
+}, true);
+
+console.log('✨ Tab context menu fixed with document delegation');
