@@ -36,11 +36,20 @@ if (!window.__MONACO_CONFIGURED__) {
 	
 	// Language pack optimization - only register languages that are used
 	window.__MONACO_LANGUAGES_LOADED__ = new Set();
+	window.__MONACO_LANGUAGE_CACHE__ = new Map(); // Cache loaded language modules
+	
 	window.__loadMonacoLanguage = function(languageId) {
 		if (window.__MONACO_LANGUAGES_LOADED__.has(languageId)) {
 			return Promise.resolve();
 		}
-		// Map app languages to Monaco basic-languages entries
+		
+		// Check cache first
+		if (window.__MONACO_LANGUAGE_CACHE__.has(languageId)) {
+			window.__MONACO_LANGUAGES_LOADED__.add(languageId);
+			return Promise.resolve();
+		}
+		
+		// Expanded language map for better coverage
 		const basicMap = {
 			'javascript': 'javascript', 'typescript': 'typescript',
 			'json': 'json',
@@ -48,23 +57,39 @@ if (!window.__MONACO_CONFIGURED__) {
 			'css': 'css', 'scss': 'scss', 'less': 'less',
 			'python': 'python', 'markdown': 'markdown',
 			'shell': 'shell', 'sql': 'sql', 'yaml': 'yaml',
-			'cpp': 'cpp', 'c': 'cpp'
+			'cpp': 'cpp', 'c': 'cpp',
+			'java': 'java', 'csharp': 'csharp', 'go': 'go',
+			'rust': 'rust', 'ruby': 'ruby', 'php': 'php',
+			'swift': 'swift', 'kotlin': 'kotlin', 'r': 'r',
+			'dockerfile': 'dockerfile', 'graphql': 'graphql'
 		};
+		
 		const entry = basicMap[languageId];
 		if (!entry) {
 			// Fallback: mark as loaded to avoid repeated attempts
-			console.warn('Monaco: No basic language module for', languageId);
+			console.warn('Monaco: No basic language module for', languageId, '- using plaintext');
 			window.__MONACO_LANGUAGES_LOADED__.add(languageId);
 			return Promise.resolve();
 		}
+		
+		// Load language module asynchronously
 		return new Promise((resolve) => {
+			const startTime = performance.now();
 			try {
-				require([`vs/basic-languages/${entry}/${entry}`], function() {
+				require([`vs/basic-languages/${entry}/${entry}`], function(module) {
 					window.__MONACO_LANGUAGES_LOADED__.add(languageId);
-					console.log('Monaco: Loaded basic language for', languageId);
+					window.__MONACO_LANGUAGE_CACHE__.set(languageId, module);
+					const loadTime = (performance.now() - startTime).toFixed(2);
+					console.log(`Monaco: Loaded ${languageId} in ${loadTime}ms`);
 					resolve();
-				}, function() { resolve(); });
-			} catch { resolve(); }
+				}, function(err) {
+					console.error('Monaco: Failed to load language', languageId, err);
+					resolve();
+				});
+			} catch (err) {
+				console.error('Monaco: Error loading language', languageId, err);
+				resolve();
+			}
 		});
 	};
 }
@@ -298,6 +323,19 @@ const settings = {
 	tabSize: 4, // Number of spaces per tab
 	fontLigatures: true, // Enable font ligatures
 	compactMode: false, // Compact UI for smaller screens
+	minimapEnabled: true, // Show minimap in editor
+	statusBarItems: {
+		cursorPos: true,
+		selection: true,
+		language: true,
+		encoding: true,
+		eol: true,
+		tabSize: true,
+		gitBranch: true,
+		problems: true,
+		fileSize: true,
+		readWriteMode: true
+	}
 };
 
 function loadSettings() {
@@ -439,6 +477,34 @@ function updateBreadcrumb(filePath) {
 }
 
 function applySettings() {
+	// Apply UI settings that don't require Monaco editor
+	// Apply theme class to body
+	document.body.classList.remove('theme-light', 'theme-dark', 'theme-dracula', 'theme-nord', 'theme-monokai');
+	document.body.classList.add(`theme-${settings.theme || 'dark'}`);
+	document.body.classList.toggle('compact-mode', settings.compactMode);
+	
+	// Update tab size display in status bar
+	updateTabSizeDisplay();
+	
+	// Apply cursor blink duration CSS variable (used by custom cursor animation)
+	try { document.documentElement.style.setProperty('--cursor-blink-duration', `${Math.max(300, Math.min(3000, parseInt(settings.cursorBlinkMs || 1200, 10)))}ms`); } catch {}
+	
+	// Apply status bar visibility on app container
+	try {
+		const appEl = document.querySelector('.app');
+		if (appEl) appEl.classList.toggle('statusbar-hidden', !settings.statusBarVisible);
+	} catch {}
+	
+	// Update terminal theme if terminal exists
+	updateTerminalTheme();
+	
+	// Apply statusbar items visibility
+	applyStatusBarVisibility();
+	
+	// Reflect state in View menu
+	updateViewMenuState?.();
+	
+	// If editor is not ready yet, skip editor-specific settings
 	if (!editor || !monacoRef) return;
 	
 	// Get Monaco theme name
@@ -456,15 +522,15 @@ function applySettings() {
 	editor.updateOptions({ 
 		fontFamily: settings.fontFamily, 
 		fontSize: settings.fontSize,
-		fontLigatures: settings.fontLigatures 
+		fontLigatures: settings.fontLigatures,
+		wordWrap: settings.wordWrap, 
+		lineNumbers: settings.lineNumbers, 
+		renderWhitespace: settings.renderWhitespace, 
+		tabSize: settings.tabSize,
+		minimap: { enabled: settings.minimapEnabled !== false }
 	});
 	monacoRef.editor.setTheme(getMonacoTheme(settings.theme));
 	
-	// Apply theme class to body
-	document.body.classList.remove('theme-light', 'theme-dark', 'theme-dracula', 'theme-nord', 'theme-monokai');
-	document.body.classList.add(`theme-${settings.theme || 'dark'}`);
-	document.body.classList.toggle('compact-mode', settings.compactMode);
-	editor.updateOptions({ wordWrap: settings.wordWrap, lineNumbers: settings.lineNumbers, renderWhitespace: settings.renderWhitespace, tabSize: settings.tabSize });
 	if (editor2Instance) {
 		editor2Instance.updateOptions({ 
 			fontFamily: settings.fontFamily, 
@@ -473,27 +539,11 @@ function applySettings() {
 			wordWrap: settings.wordWrap, 
 			lineNumbers: settings.lineNumbers, 
 			renderWhitespace: settings.renderWhitespace, 
-			tabSize: settings.tabSize 
+			tabSize: settings.tabSize,
+			minimap: { enabled: settings.minimapEnabled !== false }
 		});
 		monacoRef.editor.setTheme(getMonacoTheme(settings.theme));
 	}
-		// Update tab size display in status bar
-		updateTabSizeDisplay();
-		
-		// Apply cursor blink duration CSS variable (used by custom cursor animation)
-		try { document.documentElement.style.setProperty('--cursor-blink-duration', `${Math.max(300, Math.min(3000, parseInt(settings.cursorBlinkMs || 1200, 10)))}ms`); } catch {}
-		
-		// Apply status bar visibility via grid row class for animation
-		try {
-			const main = document.querySelector('.main');
-			if (main) main.classList.toggle('statusbar-hidden', !settings.statusBarVisible);
-		} catch {}
-		
-		// Update terminal theme if terminal exists
-		updateTerminalTheme();
-		
-		// Reflect state in View menu
-		updateViewMenuState?.();
 }
 
 function getTerminalThemeForCurrentSettings() {
@@ -544,6 +594,94 @@ function getTerminalThemeForCurrentSettings() {
 		brightCyan: '#29b8db',
 		brightWhite: '#ffffff'
 	};
+}
+
+// Utility: Debounce function to limit how often a function is called
+function debounce(func, wait) {
+	let timeout;
+	return function executedFunction(...args) {
+		const later = () => {
+			clearTimeout(timeout);
+			func(...args);
+		};
+		clearTimeout(timeout);
+		timeout = setTimeout(later, wait);
+	};
+}
+
+// Utility: Throttle function to limit how often a function is called
+function throttle(func, limit) {
+	let inThrottle;
+	return function(...args) {
+		if (!inThrottle) {
+			func.apply(this, args);
+			inThrottle = true;
+			setTimeout(() => inThrottle = false, limit);
+		}
+	};
+}
+
+// Utility: Memoize function to cache expensive calculations
+function memoize(func, maxCacheSize = 500) {
+	const cache = new Map();
+	return function(...args) {
+		const key = JSON.stringify(args);
+		if (cache.has(key)) {
+			return cache.get(key);
+		}
+		const result = func.apply(this, args);
+		// Prevent unlimited cache growth
+		if (cache.size >= maxCacheSize) {
+			const firstKey = cache.keys().next().value;
+			cache.delete(firstKey);
+		}
+		cache.set(key, result);
+		return result;
+	};
+}
+
+// Memoized: Cache file size calculations
+const formatFileSize = memoize(function(bytes) {
+	if (!bytes || bytes === 0) return '';
+	const units = ['B', 'KB', 'MB', 'GB'];
+	const i = Math.floor(Math.log(bytes) / Math.log(1024));
+	const size = (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1);
+	return `${size} ${units[i]}`;
+});
+
+function updateFileSize(content) {
+	const fileSizeEl = document.getElementById('fileSize');
+	if (!fileSizeEl) return;
+	const bytes = new Blob([content || '']).size;
+	fileSizeEl.textContent = formatFileSize(bytes);
+}
+
+// Debounced version for frequent updates (typing)
+const updateFileSizeDebounced = debounce(updateFileSize, 500);
+
+function applyStatusBarVisibility() {
+	const items = settings.statusBarItems || {};
+	const cursorPosEl = document.getElementById('cursorPos');
+	const selectionEl = document.getElementById('selection');
+	const langEl = document.getElementById('lang');
+	const encodingEl = document.getElementById('encoding');
+	const eolEl = document.getElementById('eol');
+	const tabSizeEl = document.getElementById('tabSize');
+	const gitBranchEl = document.getElementById('gitBranch');
+	const problemsCountEl = document.getElementById('problemsCount');
+	const fileSizeEl = document.getElementById('fileSize');
+	const readWriteModeEl = document.getElementById('readWriteMode');
+	
+	if (cursorPosEl) cursorPosEl.style.display = items.cursorPos !== false ? '' : 'none';
+	if (selectionEl) selectionEl.style.display = items.selection !== false ? '' : 'none';
+	if (langEl) langEl.style.display = items.language !== false ? '' : 'none';
+	if (encodingEl) encodingEl.style.display = items.encoding !== false ? '' : 'none';
+	if (eolEl) eolEl.style.display = items.eol !== false ? '' : 'none';
+	if (tabSizeEl) tabSizeEl.style.display = items.tabSize !== false ? '' : 'none';
+	if (gitBranchEl) gitBranchEl.style.display = items.gitBranch !== false ? '' : 'none';
+	if (problemsCountEl) problemsCountEl.style.display = items.problems !== false ? '' : 'none';
+	if (fileSizeEl) fileSizeEl.style.display = items.fileSize !== false ? '' : 'none';
+	if (readWriteModeEl) readWriteModeEl.style.display = items.readWriteMode !== false ? '' : 'none';
 }
 
 function updateTerminalTheme() {
@@ -624,6 +762,7 @@ window.addEventListener('DOMContentLoaded', () => {
 		} catch {}
 	})();
 	loadSettings();
+	applySettings(); // Apply UI settings early (statusbar, theme, etc.)
 	loadRecents();
 
 	const menubar = document.getElementById('menubar');
@@ -721,6 +860,7 @@ window.addEventListener('DOMContentLoaded', () => {
 	const mFileSaveAs = document.getElementById('mFileSaveAs');
 	const mFileOpenRecentFile = document.getElementById('mFileOpenRecentFile');
 	const mFileOpenRecentFolder = document.getElementById('mFileOpenRecentFolder');
+	const mFileClearRecent = document.getElementById('mFileClearRecent');
 	const mFileCloseAll = document.getElementById('mFileCloseAll');
 	const mFileReopenClosed = document.getElementById('mFileReopenClosed');
 	const mFileExit = document.getElementById('mFileExit');
@@ -751,6 +891,20 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const prefFormatOnSave = document.getElementById('prefFormatOnSave');
 	const prefFontLigatures = document.getElementById('prefFontLigatures');
 	const prefCompactMode = document.getElementById('prefCompactMode');
+	const prefMinimap = document.getElementById('prefMinimap');
+	const fontPreview = document.getElementById('fontPreview');
+	const prefStatusCursorPos = document.getElementById('prefStatusCursorPos');
+	const prefStatusSelection = document.getElementById('prefStatusSelection');
+	const prefStatusLanguage = document.getElementById('prefStatusLanguage');
+	const prefStatusEncoding = document.getElementById('prefStatusEncoding');
+	const prefStatusEol = document.getElementById('prefStatusEol');
+	const prefStatusTabSize = document.getElementById('prefStatusTabSize');
+	const prefStatusGitBranch = document.getElementById('prefStatusGitBranch');
+	const prefStatusProblems = document.getElementById('prefStatusProblems');
+	const prefStatusFileSize = document.getElementById('prefStatusFileSize');
+	const prefStatusReadWriteMode = document.getElementById('prefStatusReadWriteMode');
+	const themePreview = document.getElementById('themePreview');
+	const importCustomTheme = document.getElementById('importCustomTheme');
 
 	const mFileNew = document.getElementById('mFileNew');
 	const newFileBtn = document.getElementById('sidebarNewFile');
@@ -764,6 +918,11 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 	const mHelpAbout = document.getElementById('mHelpAbout');
 	const aboutModal = document.getElementById('aboutModal');
 	const aboutClose = document.getElementById('aboutClose');
+	
+	// Keyboard Shortcuts modal elements
+	const mHelpKeyboardShortcuts = document.getElementById('mHelpKeyboardShortcuts');
+	const shortcutsModal = document.getElementById('shortcutsModal');
+	const shortcutsClose = document.getElementById('shortcutsClose');
 
 	const mEditFind = document.getElementById('mEditFind');
 
@@ -884,7 +1043,7 @@ const mViewZenMode = document.getElementById('mViewZenMode');
 			{ id: 'view:toggleWordWrap', title: 'View: Toggle Word Wrap', hint: 'Alt+Z', run: () => mViewToggleWordWrap?.click() },
 			{ id: 'view:toggleLineNumbers', title: 'View: Toggle Line Numbers', run: () => mViewToggleLineNumbers?.click() },
 			{ id: 'view:toggleWhitespace', title: 'View: Toggle Render Whitespace', run: () => mViewToggleWhitespace?.click() },
-			{ id: 'editor:toggleMinimap', title: 'Editor: Toggle Minimap', run: () => { if (editor) { const opts = editor.getRawOptions(); editor.updateOptions({ minimap: { enabled: !opts.minimap?.enabled } }); } } },
+			{ id: 'editor:toggleMinimap', title: 'Editor: Toggle Minimap', hint: 'Ctrl+M', run: () => { if (editor) { const opts = editor.getRawOptions(); const enabled = !opts.minimap?.enabled; settings.minimapEnabled = enabled; saveSettings(); editor.updateOptions({ minimap: { enabled } }); if (editor2Instance) editor2Instance.updateOptions({ minimap: { enabled } }); } } },
 		];
 	}
 	buildCommands();
@@ -915,6 +1074,15 @@ safeBind(winClose, 'click', () => window.bridge?.window?.close?.());
 safeBind(mHelpAbout, 'click', () => { aboutModal.classList.remove('hidden'); });
 safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 
+// Keyboard Shortcuts modal bindings
+safeBind(mHelpKeyboardShortcuts, 'click', () => { shortcutsModal.classList.remove('hidden'); });
+safeBind(shortcutsClose, 'click', () => { shortcutsModal.classList.add('hidden'); });
+safeBind(shortcutsModal, 'click', (e) => {
+	if (e.target === shortcutsModal || e.target.classList.contains('modal-backdrop')) {
+		shortcutsModal.classList.add('hidden');
+	}
+});
+
 	// Basic menu bindings
 	safeBind(mEditUndo, 'click', () => { editor?.trigger('menu', 'undo', null); });
 	safeBind(mEditRedo, 'click', () => { editor?.trigger('menu', 'redo', null); });
@@ -935,17 +1103,95 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		if (prefFormatOnSave) prefFormatOnSave.checked = settings.formatOnSave || false;
 		if (prefFontLigatures) prefFontLigatures.checked = settings.fontLigatures !== false;
 		if (prefCompactMode) prefCompactMode.checked = settings.compactMode || false;
+		if (prefMinimap) prefMinimap.checked = settings.minimapEnabled !== false;
 		if (prefCursorBlink) {
 			const val = Math.max(300, Math.min(3000, parseInt(settings.cursorBlinkMs || 1200, 10)));
 			prefCursorBlink.value = String(val);
 			if (prefCursorBlinkVal) prefCursorBlinkVal.textContent = `${val} ms`;
 		}
+		// Load statusbar items visibility
+		if (prefStatusCursorPos) prefStatusCursorPos.checked = settings.statusBarItems?.cursorPos !== false;
+		if (prefStatusSelection) prefStatusSelection.checked = settings.statusBarItems?.selection !== false;
+		if (prefStatusLanguage) prefStatusLanguage.checked = settings.statusBarItems?.language !== false;
+		if (prefStatusEncoding) prefStatusEncoding.checked = settings.statusBarItems?.encoding !== false;
+		if (prefStatusEol) prefStatusEol.checked = settings.statusBarItems?.eol !== false;
+		if (prefStatusTabSize) prefStatusTabSize.checked = settings.statusBarItems?.tabSize !== false;
+		if (prefStatusGitBranch) prefStatusGitBranch.checked = settings.statusBarItems?.gitBranch !== false;
+		if (prefStatusProblems) prefStatusProblems.checked = settings.statusBarItems?.problems !== false;
+		if (prefStatusFileSize) prefStatusFileSize.checked = settings.statusBarItems?.fileSize !== false;
+		if (prefStatusReadWriteMode) prefStatusReadWriteMode.checked = settings.statusBarItems?.readWriteMode !== false;
+		// Update font and theme previews
+		updateFontPreview();
+		updateThemePreview();
 		autoSaveDelayField.style.display = settings.autoSave === 'afterDelay' ? 'grid' : 'none';
 		prefsModal.classList.remove('hidden');
 	}
 	function closePrefs() { prefsModal.classList.add('hidden'); }
+	
+	function updateFontPreview() {
+		if (!fontPreview) return;
+		const family = prefFontFamily.value || settings.fontFamily;
+		const size = prefFontSize.value || settings.fontSize;
+		const ligatures = prefFontLigatures ? prefFontLigatures.checked : settings.fontLigatures;
+		fontPreview.style.fontFamily = family;
+		fontPreview.style.fontSize = `${size}px`;
+		fontPreview.style.fontFeatureSettings = ligatures ? '"liga" 1, "calt" 1' : '"liga" 0, "calt" 0';
+		fontPreview.style.fontVariantLigatures = ligatures ? 'normal' : 'none';
+	}
+	
+	function updateThemePreview() {
+		if (!themePreview || !prefTheme) return;
+		const theme = prefTheme.value;
+		const themeColors = {
+			dark: { bg: '#0f1419', secondary: '#1a1e2e', accent: '#6366f1', text: '#e0e7ff' },
+			light: { bg: '#ffffff', secondary: '#f8fafc', accent: '#3b82f6', text: '#0f172a' },
+			dracula: { bg: '#282a36', secondary: '#21222c', accent: '#bd93f9', text: '#f8f8f2' },
+			nord: { bg: '#2e3440', secondary: '#3b4252', accent: '#88c0d0', text: '#d8dee9' },
+			monokai: { bg: '#272822', secondary: '#1e1f1c', accent: '#a6e22e', text: '#f8f8f2' }
+		};
+		const colors = themeColors[theme] || themeColors.dark;
+		themePreview.style.background = colors.bg;
+		themePreview.style.color = colors.text;
+	}
 
 	safeBind(prefsCancel, 'click', closePrefs);
+	// Close modal when clicking backdrop
+	safeBind(prefsModal, 'click', (e) => {
+		if (e.target === prefsModal || e.target.classList.contains('modal-backdrop')) {
+			closePrefs();
+		}
+	});
+	// Update font preview on changes
+	safeBind(prefFontFamily, 'input', updateFontPreview);
+	safeBind(prefFontSize, 'input', updateFontPreview);
+	safeBind(prefFontLigatures, 'change', updateFontPreview);
+	// Update theme preview on change
+	safeBind(prefTheme, 'change', updateThemePreview);
+	// Custom theme import
+	safeBind(importCustomTheme, 'click', async () => {
+		const input = document.createElement('input');
+		input.type = 'file';
+		input.accept = '.json';
+		input.onchange = async (e) => {
+			const file = e.target.files[0];
+			if (!file) return;
+			try {
+				const text = await file.text();
+				const theme = JSON.parse(text);
+				// Validate theme structure
+				if (!theme.name || !theme.colors) {
+					alert('Invalid theme file. Must contain "name" and "colors" properties.');
+					return;
+				}
+				// Store custom theme
+				localStorage.setItem('barge:customTheme', text);
+				alert(`Custom theme "${theme.name}" imported successfully!\n\nNote: Custom theme support is experimental.`);
+			} catch (err) {
+				alert('Error importing theme: ' + err.message);
+			}
+		};
+		input.click();
+	});
 	if (prefTabSize) {
 		safeBind(prefTabSize, 'input', () => { if (prefTabSizeVal) prefTabSizeVal.textContent = `${prefTabSize.value} spaces`; });
 	}
@@ -963,9 +1209,23 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		if (prefFormatOnSave) settings.formatOnSave = prefFormatOnSave.checked;
 		if (prefFontLigatures) settings.fontLigatures = prefFontLigatures.checked;
 		if (prefCompactMode) settings.compactMode = prefCompactMode.checked;
+		if (prefMinimap) settings.minimapEnabled = prefMinimap.checked;
 		if (prefCursorBlink && prefCursorBlink.value) settings.cursorBlinkMs = Math.max(300, Math.min(3000, parseInt(prefCursorBlink.value, 10)));
+		// Save statusbar items visibility
+		if (!settings.statusBarItems) settings.statusBarItems = {};
+		if (prefStatusCursorPos) settings.statusBarItems.cursorPos = prefStatusCursorPos.checked;
+		if (prefStatusSelection) settings.statusBarItems.selection = prefStatusSelection.checked;
+		if (prefStatusLanguage) settings.statusBarItems.language = prefStatusLanguage.checked;
+		if (prefStatusEncoding) settings.statusBarItems.encoding = prefStatusEncoding.checked;
+		if (prefStatusEol) settings.statusBarItems.eol = prefStatusEol.checked;
+		if (prefStatusTabSize) settings.statusBarItems.tabSize = prefStatusTabSize.checked;
+		if (prefStatusGitBranch) settings.statusBarItems.gitBranch = prefStatusGitBranch.checked;
+		if (prefStatusProblems) settings.statusBarItems.problems = prefStatusProblems.checked;
+		if (prefStatusFileSize) settings.statusBarItems.fileSize = prefStatusFileSize.checked;
+		if (prefStatusReadWriteMode) settings.statusBarItems.readWriteMode = prefStatusReadWriteMode.checked;
 		saveSettings();
 		applySettings();
+		applyStatusBarVisibility();
 		closePrefs();
 	});
 
@@ -1046,6 +1306,7 @@ safeBind(aboutClose, 'click', () => { aboutModal.classList.add('hidden'); });
 		if (e.ctrlKey && e.key.toLowerCase() === 'n') { e.preventDefault(); mFileNew?.click(); }
 		if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'n') { e.preventDefault(); mFileNewWindow?.click(); }
 	if (e.ctrlKey && e.key.toLowerCase() === 'b') { e.preventDefault(); mViewToggleSidebar?.click(); }
+	if (e.ctrlKey && e.key.toLowerCase() === 'm') { e.preventDefault(); toggleMinimapBtn?.click(); }
 });
 
 	updateEmptyState();
@@ -1339,14 +1600,21 @@ safeBind(sidebarOpenFolder, 'click', openFolderFlow);
 
 	safeBind(mViewToggleTerminal, 'click', async () => {
 		terminalPanel?.classList.toggle('hidden');
-		if (!terminalPanel?.classList.contains('hidden')) {
+		const isVisible = !terminalPanel?.classList.contains('hidden');
+		if (isVisible) {
 			if (!terminalOrder.length) {
 				await window.createTerminal?.();
-					} else {
+			} else {
 				const active = terminals.get(termId);
 				active?.instance?.focus?.();
 				scheduleTerminalResize(termId, 100);
 			}
+		}
+		// Update status bar terminal button
+		const termBtn = document.getElementById('statusbarTerminal');
+		if (termBtn) {
+			termBtn.classList.toggle('active', isVisible);
+			termBtn.setAttribute('aria-checked', String(isVisible));
 		}
 		updateViewMenuState?.();
 	});
@@ -1687,35 +1955,181 @@ document.addEventListener('DOMContentLoaded', () => {
 			return el;
 		}
 
+		// Virtual scrolling state
+		let flattenedTree = [];
+		let virtualScrollState = {
+			itemHeight: 24, // Height of each item in pixels
+			visibleCount: 50, // Number of items to render
+			startIndex: 0,
+			scrollTop: 0
+		};
+
+		// Flatten tree structure for virtual scrolling
+		function flattenTree(nodes, level = 0, result = [], parentExpanded = true) {
+			for (const node of nodes) {
+				result.push({ node, level, isVisible: parentExpanded });
+				if (node.type === 'dir' && node.children && node.children.length > 0) {
+					const isExpanded = !node.collapsed; // Check if this folder is expanded
+					flattenTree(node.children, level + 1, result, parentExpanded && isExpanded);
+				}
+			}
+			return result;
+		}
+
 		function renderTree(root, tree) {
 			const fileTreeEl = document.getElementById('fileTree');
 			fileTreeEl.innerHTML = '';
+			
+			// Store tree globally for re-flattening
+			window.__currentTree__ = tree;
+			
+			// Create wrapper for virtual scrolling
+			const wrapper = document.createElement('div');
+			wrapper.className = 'tree-scroll-wrapper';
+			wrapper.style.position = 'relative';
+			wrapper.style.overflow = 'auto';
+			wrapper.style.height = '100%';
+			
+			// Create viewport container
+			const viewport = document.createElement('div');
+			viewport.className = 'tree-viewport';
+			viewport.style.position = 'relative';
 			
 			// Create root element
 			const rootEl = document.createElement('div'); 
 			rootEl.className = 'item'; 
 			rootEl.textContent = root; 
-			fileTreeEl.appendChild(rootEl);
+			viewport.appendChild(rootEl);
 			rootEl.addEventListener('click', () => { 
 				selectedDirectoryPath = root; 
 				highlightSelectedDir(rootEl); 
 			});
 			
-			// Create children container for root
-			const children = document.createElement('div'); 
-			children.className = 'children'; 
-			children.style.display = 'block'; // Show root children by default
-			fileTreeEl.appendChild(children);
+			// Flatten tree for virtual scrolling
+			flattenedTree = flattenTree(tree);
 			
-			// Add all tree nodes
-			for (const node of tree) {
-				const nodeContainer = renderNode(node);
-				children.appendChild(nodeContainer);
-			}
+			// Calculate total height
+			const totalHeight = flattenedTree.filter(item => item.isVisible).length * virtualScrollState.itemHeight;
+			viewport.style.height = `${totalHeight}px`;
+			
+			// Create container for visible items
+			const container = document.createElement('div');
+			container.className = 'tree-items-container';
+			container.style.position = 'absolute';
+			container.style.top = '0';
+			container.style.left = '0';
+			container.style.right = '0';
+			
+			viewport.appendChild(container);
+			wrapper.appendChild(viewport);
+			fileTreeEl.appendChild(wrapper);
+			
+			// Render initial visible items
+			renderVisibleItems(container);
+			
+			// Handle scroll events (throttled for smooth performance)
+			const handleScroll = throttle(() => {
+				virtualScrollState.scrollTop = wrapper.scrollTop;
+				renderVisibleItems(container);
+			}, 16); // ~60fps
+			
+			wrapper.addEventListener('scroll', handleScroll, { passive: true });
 			
 			attachTreeContextMenu(fileTreeEl);
 			enableTreeKeyboard(fileTreeEl);
 			enableTreeDnD(fileTreeEl);
+		}
+		
+		function renderVisibleItems(container) {
+			const { itemHeight, visibleCount, scrollTop } = virtualScrollState;
+			const visibleItems = flattenedTree.filter(item => item.isVisible);
+			
+			// Calculate which items should be visible
+			const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - 5); // Add buffer
+			const endIndex = Math.min(visibleItems.length, startIndex + visibleCount + 10); // Add buffer
+			
+			// Clear container
+			container.innerHTML = '';
+			container.style.transform = `translateY(${startIndex * itemHeight}px)`;
+			
+			// Render only visible items
+			for (let i = startIndex; i < endIndex; i++) {
+				const { node, level } = visibleItems[i];
+				const nodeEl = renderNodeVirtual(node, level);
+				container.appendChild(nodeEl);
+			}
+		}
+		
+		function renderNodeVirtual(node, level) {
+			const container = document.createElement('div');
+			container.style.paddingLeft = `${level * 16}px`;
+			container.style.height = `${virtualScrollState.itemHeight}px`;
+			
+			const el = document.createElement('div');
+			el.className = 'item';
+			el.dataset.path = node.path || '';
+			el.dataset.type = node.type || '';
+			
+			if (node.type === 'file') {
+				const ext = node.name.split('.').pop()?.toLowerCase();
+				if (ext) el.dataset.ext = ext;
+			}
+			
+			el.innerHTML = `<span class="label">${node.name}</span>`;
+			
+			if (node.type === 'dir') {
+				const hasKids = (Array.isArray(node.children) && node.children.length > 0) || !!node.hasChildren;
+				if (hasKids) {
+					el.classList.add('has-children');
+					if (node.collapsed !== false) el.classList.add('collapsed');
+					
+					const caret = document.createElement('span');
+					caret.className = 'caret';
+					if (!node.collapsed) caret.classList.add('open');
+					caret.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+					el.appendChild(caret);
+					
+					el.addEventListener('click', (e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						node.collapsed = !node.collapsed;
+						
+						// Re-flatten tree with updated collapsed states
+						const fileTreeEl = document.getElementById('fileTree');
+						const rootTree = window.__currentTree__ || [];
+						flattenedTree = flattenTree(rootTree);
+						
+						const wrapper = document.querySelector('.tree-scroll-wrapper');
+						const viewport = wrapper.querySelector('.tree-viewport');
+						const itemsContainer = wrapper.querySelector('.tree-items-container');
+						
+						// Update height
+						const visibleItems = flattenedTree.filter(item => item.isVisible);
+						viewport.style.height = `${visibleItems.length * virtualScrollState.itemHeight}px`;
+						
+						renderVisibleItems(itemsContainer);
+						selectedDirectoryPath = node.path;
+						highlightSelectedDir(el);
+					});
+				} else {
+					el.addEventListener('click', () => {
+						selectedDirectoryPath = node.path;
+						highlightSelectedDir(el);
+					});
+				}
+			} else {
+				el.addEventListener('click', () => {
+					highlightSelectedDir(el);
+					if (monacoRef) {
+						window.bridge.readFileByPath(node.path).then(file => {
+							if (file && file.content !== undefined) openFileInTab(node.path, file.content);
+						});
+					}
+				});
+			}
+			
+			container.appendChild(el);
+			return container;
 		}
 
 		function highlightSelectedDir(el) {
@@ -1824,7 +2238,21 @@ document.addEventListener('DOMContentLoaded', () => {
 				console.error('Monaco not available yet');
 				return null;
 			}
-			
+			// Normalize content to string (bridge may return Buffer/Uint8Array/Array)
+			const toText = (c) => {
+				try {
+					if (typeof c === 'string') return c;
+					if (c instanceof Uint8Array) return new TextDecoder('utf-8').decode(c);
+					if (Array.isArray(c)) return new TextDecoder('utf-8').decode(new Uint8Array(c));
+					if (c && typeof c === 'object' && 'data' in c && Array.isArray(c.data)) {
+						return new TextDecoder('utf-8').decode(new Uint8Array(c.data));
+					}
+				} catch (e) { console.warn('Failed to decode content, falling back to String()', e); }
+				return String(c ?? '');
+			};
+			const text = toText(content);
+			try { console.log('[Model] toText length for', filePath, text?.length); } catch {}
+
 			let model = modelsByPath.get(filePath); 
 			if (!model) { 
 				const uri = monacoRef.Uri.file(filePath); 
@@ -1835,23 +2263,46 @@ document.addEventListener('DOMContentLoaded', () => {
 						console.warn('Failed to load language pack for', language, err);
 					});
 				}
-				model = monacoRef.editor.createModel(content ?? '', language, uri); 
+				model = monacoRef.editor.createModel(text, language, uri); 
 				modelsByPath.set(filePath, model); 
-			} else if (typeof content === 'string' && model.getValue() !== content) { 
-				model.setValue(content); 
+			} else if (model.getValue() !== text) { 
+				try { console.log('[Model] updating existing model for', filePath, 'new length=', text?.length); } catch {}
+				model.setValue(text); 
 			} 
 			const language = guessLanguage(filePath);
 			monacoRef.editor.setModelLanguage(model, language); 
+			try { console.log('[Model] language set to', language, 'for', filePath); } catch {}
 			return model; 
 		}
 
 		function openFileInTab(filePath, content) {
 							// open file in tab
+			try { console.log('[Open] openFileInTab', filePath, 'content type=', typeof content); } catch {}
 			const model = getOrCreateModel(filePath, content);
 			if (!model) {
 				console.error('Cannot create model - Monaco not ready');
 				return;
 			}
+			// Fallback: if model is empty and no content was provided, try re-reading from bridge
+			try {
+				const valLen = model?.getValue()?.length ?? 0;
+				const noInput = (content === undefined || content === null || (typeof content === 'string' && content.length === 0));
+				if (valLen === 0 && noInput && window.bridge?.readFileByPath) {
+					console.log('[Open] Empty model, attempting fallback read for', filePath);
+					window.bridge.readFileByPath(filePath).then((file) => {
+						try {
+							const c = file?.content ?? '';
+							const dec = (typeof c === 'string') ? c : (Array.isArray(c) || c instanceof Uint8Array || (c && typeof c === 'object' && 'data' in c)) ? new TextDecoder('utf-8').decode(c instanceof Uint8Array ? c : Array.isArray(c) ? new Uint8Array(c) : new Uint8Array(c.data)) : String(c ?? '');
+							if (dec && dec.length) {
+								model.setValue(dec);
+								activateTab(filePath);
+								scheduleRelayout?.();
+								console.log('[Open] Fallback read applied, length=', dec.length);
+							}
+						} catch (e) { console.warn('[Open] Fallback read failed to apply', e); }
+					}).catch(err => console.warn('[Open] Fallback read failed', err));
+				}
+			} catch {}
 			
 			let tab = openTabs.find(t => t.path === filePath);
 			if (!tab) { 
@@ -1868,36 +2319,32 @@ document.addEventListener('DOMContentLoaded', () => {
 				const closeEl = document.createElement('div'); 
 				closeEl.className = 'close'; 
 				closeEl.textContent = '×'; 
-				closeEl.addEventListener('click', (e) => { 
-					console.log('Close button clicked for:', filePath);
-					e.stopPropagation(); 
-					closeTab(filePath); 
-					updateEmptyState(); 
-				}); 
+				// No individual listeners - using event delegation
 				tabEl.appendChild(titleEl); 
 				tabEl.appendChild(closeEl); 
-				tabEl.addEventListener('click', (e) => { 
-					// tab click
-					// debug removed
-					
-					e.preventDefault();
-					e.stopPropagation(); 
-					e.stopImmediatePropagation();
-					
-					// tab activated
-					activateTab(filePath); 
-				}); 
 				tab._el = tabEl; 
 				tab._titleEl = titleEl; 
 				tabsEl.appendChild(tabEl); 
 				attachTabDnD();
 			}
 			activateTab(filePath);
+			try { console.log('[Open] activated tab for', filePath); } catch {}
 			// Remove duplicate editor.setModel() call - it's already called in activateTab()
 			// editor.setModel(model);
 			// editor.focus();
-			filenameEl.textContent = filePath; 
-			langEl.textContent = guessLanguage(filePath); 
+			// Update status bar labels safely (elements may not exist in some layouts)
+			const filenameEl = document.getElementById('filename');
+			const langEl = document.getElementById('lang');
+			if (filenameEl) filenameEl.textContent = filePath;
+			if (langEl) langEl.textContent = guessLanguage(filePath);
+			// Update file size and read/write mode
+			updateFileSize(content || model?.getValue());
+			const readWriteModeEl = document.getElementById('readWriteMode');
+			if (readWriteModeEl) {
+				readWriteModeEl.textContent = 'RW';
+				readWriteModeEl.classList.remove('read-only');
+			}
+			try { console.log('[Open] model value length', model?.getValue()?.length); } catch {}
 			markDirty(filePath, false); 
 			updateStatus();
 		}
@@ -1920,6 +2367,14 @@ document.addEventListener('DOMContentLoaded', () => {
 					editor.setModel(model);
 					editor.focus();
 				}
+				// Ensure editor renders the new model
+				try { scheduleRelayout?.(); } catch {}
+				try {
+					const container = document.getElementById(activePane === 'right' ? 'editor2' : 'editor');
+					if (container && editor?.layout) {
+						editor.layout({ width: container.clientWidth, height: container.clientHeight });
+					}
+				} catch {}
 				// Update active tab styling
 				try {
 					for (const t of openTabs) {
@@ -2263,9 +2718,38 @@ document.addEventListener('DOMContentLoaded', () => {
 					}
 				});
 			}
+			
+			// Encoding click handler
+			const encodingEl = document.getElementById('encoding');
+			if (encodingEl) {
+				encodingEl.style.cursor = 'pointer';
+				encodingEl.addEventListener('click', () => {
+					// For now, just show info - full implementation would require encoding conversion
+					alert('Encoding: UTF-8\n\nNote: Encoding conversion is not yet implemented.');
+				});
+			}
+			
+			// EOL click handler
+			const eolEl = document.getElementById('eol');
+			if (eolEl) {
+				eolEl.style.cursor = 'pointer';
+				eolEl.addEventListener('click', () => {
+					const current = eolEl.textContent;
+					const newEol = current === 'LF' ? 'CRLF' : 'LF';
+					eolEl.textContent = newEol;
+					// Update editor content with new line endings if needed
+					if (editor) {
+						const model = editor.getModel();
+						if (model) {
+							model.setEOL(newEol === 'CRLF' ? 1 : 0); // 0 = LF, 1 = CRLF
+						}
+					}
+				});
+			}
 		}
 
-		function guessLanguage(filePath) {
+		// Memoized: Cache language detection results (called frequently)
+		const guessLanguage = memoize(function(filePath) {
 			const ext = filePath.split('.').pop()?.toLowerCase();
 			const langMap = {
 				'js': 'javascript', 'jsx': 'javascript', 'ts': 'typescript', 'tsx': 'typescript',
@@ -2282,7 +2766,7 @@ document.addEventListener('DOMContentLoaded', () => {
 				'log': 'log', 'txt': 'plaintext', 'text': 'plaintext'
 			};
 			return langMap[ext] || 'plaintext';
-		}
+		});
 
 		function basename(p) { return p.split('/').pop(); }
 
@@ -2415,6 +2899,36 @@ document.addEventListener('DOMContentLoaded', () => {
 		const filenameEl = document.getElementById('filename');
 		const fileTreeEl = document.getElementById('fileTree');
 		const tabsEl = document.getElementById('tabs');
+		
+		// Event delegation for tabs (better memory usage with many tabs)
+		if (tabsEl) {
+			tabsEl.addEventListener('click', (e) => {
+				const closeBtn = e.target.closest('.close');
+				const tab = e.target.closest('.tab');
+				
+				if (closeBtn && tab) {
+					// Close button clicked
+					e.preventDefault();
+					e.stopPropagation();
+					const filePath = tab.dataset.path;
+					if (filePath) {
+						console.log('Close button clicked for:', filePath);
+						closeTab(filePath);
+						updateEmptyState();
+					}
+				} else if (tab) {
+					// Tab clicked
+					e.preventDefault();
+					e.stopPropagation();
+					e.stopImmediatePropagation();
+					const filePath = tab.dataset.path;
+					if (filePath) {
+						activateTab(filePath);
+					}
+				}
+			});
+		}
+		
 		const cursorPosEl = document.getElementById('cursorPos');
 		const langEl = document.getElementById('lang');
 		const gitBranchEl = document.getElementById('gitBranch');
@@ -2724,7 +3238,12 @@ document.addEventListener('DOMContentLoaded', () => {
 					} catch {}
 				});
 				editor.onDidChangeModelContent(() => { 
-					markDirty(activeTabPath, true); 
+					markDirty(activeTabPath, true);
+					// Update file size on content change (debounced for performance)
+					if (editor) {
+						const content = editor.getValue();
+						updateFileSizeDebounced(content);
+					}
 					// handleAutoSave(); 
 				});
 
@@ -2849,6 +3368,89 @@ document.addEventListener('DOMContentLoaded', () => {
 					setTimeout(() => scheduleLint(), 200);
 				} catch {}
 
+				// Web Worker-based linting for JavaScript/JSON (non-blocking)
+				try {
+					let lintWorker = null;
+					let workerLintTimer = null;
+					
+					function initLintWorker() {
+						if (lintWorker) return lintWorker;
+						
+						try {
+							lintWorker = new Worker('/src/renderer/lint.worker.js');
+							
+							lintWorker.addEventListener('message', (e) => {
+								const { type, diagnostics, language } = e.data;
+								
+								if (type === 'LINT_COMPLETE') {
+									const currentModel = editor?.getModel();
+									if (!currentModel) return;
+									
+									const markers = diagnostics.map(d => ({
+										severity: d.severity,
+										startLineNumber: d.startLineNumber,
+										startColumn: d.startColumn,
+										endLineNumber: d.endLineNumber,
+										endColumn: d.endColumn,
+										message: d.message,
+										source: 'barge-worker'
+									}));
+									
+									try {
+										monacoRef.editor.setModelMarkers(currentModel, 'barge-worker', markers);
+										console.log(`Worker Lint: ${markers.length} issues in ${language}`);
+									} catch (e) {
+										console.error('Worker Lint: Failed to set markers', e);
+									}
+								} else if (type === 'WORKER_READY') {
+									console.log('Lint Worker: Ready');
+								}
+							});
+							
+							lintWorker.addEventListener('error', (err) => {
+								console.error('Lint Worker:', err);
+							});
+							
+							console.log('Lint Worker: Initialized');
+						} catch (err) {
+							console.error('Lint Worker: Init failed', err);
+						}
+						
+						return lintWorker;
+					}
+					
+					function scheduleLintWorker() {
+						clearTimeout(workerLintTimer);
+						workerLintTimer = setTimeout(() => {
+							const model = editor?.getModel();
+							if (!model) return;
+							
+							const content = model.getValue();
+							const uri = model.uri.toString();
+							const language = model.getLanguageId();
+							
+							// Use worker for JS/TS/JSON (Python uses IPC)
+							const supportedLanguages = ['javascript', 'typescript', 'json'];
+							if (!supportedLanguages.includes(language)) return;
+							
+							const worker = initLintWorker();
+							if (!worker) return;
+							
+							const lintType = language === 'json' ? 'LINT_JSON' : 'LINT_JAVASCRIPT';
+							
+							worker.postMessage({
+								type: lintType,
+								data: { content, filePath: uri, language }
+							});
+						}, 500);
+					}
+					
+					window.__scheduleLintWorker = scheduleLintWorker;
+					editor.onDidChangeModelContent(() => scheduleLintWorker());
+					editor.onDidChangeModel(() => scheduleLintWorker());
+					setTimeout(() => scheduleLintWorker(), 300);
+				} catch {}
+
 				// Problems panel wiring
 				try {
 					const problemsPanel = document.getElementById('problemsPanel');
@@ -2917,6 +3519,8 @@ document.addEventListener('DOMContentLoaded', () => {
 							if (!editor) return;
 							const opts = editor.getRawOptions();
 							const enabled = !opts.minimap?.enabled;
+							settings.minimapEnabled = enabled;
+							saveSettings();
 							editor.updateOptions({ minimap: { enabled } });
 							if (editor2Instance) {
 								editor2Instance.updateOptions({ minimap: { enabled } });
@@ -2954,6 +3558,11 @@ document.addEventListener('DOMContentLoaded', () => {
 		}
 		function addRecentFolder(p) {
 			if (!p) return; const i = recentFolders.indexOf(p); if (i !== -1) recentFolders.splice(i,1); recentFolders.unshift(p); recentFolders = recentFolders.slice(0,5); saveRecents();
+		}
+		function clearRecentFiles() {
+			recentFiles = [];
+			recentFolders = [];
+			saveRecents();
 		}
 		function openRecentFile(path) {
 			return (async () => {
@@ -3015,6 +3624,14 @@ document.addEventListener('DOMContentLoaded', () => {
 		// Bind recent popovers and view actions inside scope
 		safeBind(mFileOpenRecentFile, 'click', (e) => { e.preventDefault(); e.stopPropagation(); showRecentModal('file'); });
 		safeBind(mFileOpenRecentFolder, 'click', (e) => { e.preventDefault(); e.stopPropagation(); showRecentModal('folder'); });
+		safeBind(mFileClearRecent, 'click', (e) => { 
+			e.preventDefault(); 
+			e.stopPropagation(); 
+			if (confirm('Clear all recent files and folders?')) {
+				clearRecentFiles();
+				alert('Recent files cleared!');
+			}
+		});
 	
 		safeBind(mViewFullScreen, 'click', (e) => { e.preventDefault(); e.stopPropagation(); window.bridge?.window?.toggleFullScreen?.(); });
 		safeBind(mViewZenMode, 'click', (e) => { e.preventDefault(); e.stopPropagation(); document.body.classList.toggle('zen'); });
@@ -3489,19 +4106,6 @@ async function ensureXtermLoaded() {
 		return false;
 	}
 
-	safeBind(mViewToggleTerminal, 'click', async () => {
-		terminalPanel?.classList.toggle('hidden');
-		if (!terminalPanel?.classList.contains('hidden')) {
-			if (!terminalOrder.length) {
-				await window.createTerminal?.();
-					} else {
-				const active = terminals.get(termId);
-				active?.instance?.focus?.();
-				setTimeout(() => applyTerminalResizeFor(termId), 60);
-			}
-		}
-		updateViewMenuState?.();
-	});
 		// Fixed terminal initialization with improved xterm loading
 		async function ensureTerminal() {
 			console.log('=== TERMINAL INITIALIZATION START ===');
@@ -4174,36 +4778,43 @@ console.log('✨ Tab context menu document delegation enabled');
 				
 			case 'rename':
 				console.log('[File Tree Context] Rename:', itemPath);
-				if (window.renameFileFlow) {
-					window.renameFileFlow(itemPath);
-				} else {
-					const newName = prompt('Enter new name:', itemPath.split('/').pop());
-					if (newName && window.bridge && window.bridge.renameFile) {
-						const newPath = itemPath.replace(/[^/]+$/, newName);
-						window.bridge.renameFile(itemPath, newPath).then(() => {
-							console.log('Renamed to:', newPath);
+				const currentName = itemPath.split('/').pop();
+				showPromptDialog('Enter new name:', currentName).then(newName => {
+					if (newName && newName !== currentName && window.bridge && window.bridge.renamePath) {
+						window.bridge.renamePath({ oldPath: itemPath, newName }).then(() => {
+							console.log('Renamed to:', newName);
 						}).catch(err => {
 							console.error('Rename failed:', err);
 							alert('Failed to rename: ' + err.message);
 						});
 					}
-				}
+				});
 				break;
 				
 			case 'duplicate':
 				console.log('[File Tree Context] Duplicate:', itemPath);
 				const baseName = itemPath.split('/').pop();
 				const dirPath = itemPath.substring(0, itemPath.lastIndexOf('/'));
-				const copyName = prompt('Enter name for duplicate:', baseName + ' copy');
-				if (copyName && window.bridge && window.bridge.duplicateFile) {
-					const copyPath = dirPath + '/' + copyName;
-					window.bridge.duplicateFile(itemPath, copyPath).then(() => {
-						console.log('Duplicated to:', copyPath);
-					}).catch(err => {
-						console.error('Duplicate failed:', err);
-						alert('Failed to duplicate: ' + err.message);
-					});
-				}
+				const ext = baseName.includes('.') ? baseName.substring(baseName.lastIndexOf('.')) : '';
+				const nameWithoutExt = baseName.includes('.') ? baseName.substring(0, baseName.lastIndexOf('.')) : baseName;
+				showPromptDialog('Enter name for duplicate:', nameWithoutExt + '_copy' + ext).then(copyName => {
+					if (copyName && window.bridge) {
+						// Read original file and write to new location
+						window.bridge.readFileByPath(itemPath).then(file => {
+							if (file && file.content !== undefined) {
+								return window.bridge.writeFileByPath({ 
+									filePath: dirPath + '/' + copyName, 
+									content: file.content 
+								});
+							}
+						}).then(() => {
+							console.log('Duplicated to:', dirPath + '/' + copyName);
+						}).catch(err => {
+							console.error('Duplicate failed:', err);
+							alert('Failed to duplicate: ' + err.message);
+						});
+					}
+				});
 				break;
 				
 			case 'copy-path':
@@ -4232,8 +4843,12 @@ console.log('✨ Tab context menu document delegation enabled');
 				
 			case 'new-file':
 				console.log('[File Tree Context] New file in:', itemPath);
+				const isDir = itemType === 'dir';
+				const targetDir = isDir ? itemPath : itemPath.substring(0, itemPath.lastIndexOf('/'));
 				if (window.createFileFlow) {
-					window.createFileFlow();
+					window.createFileFlow(targetDir);
+				} else if (document.getElementById('sidebarNewFile')) {
+					document.getElementById('sidebarNewFile').click();
 				}
 				break;
 				
@@ -4254,16 +4869,16 @@ console.log('✨ Tab context menu document delegation enabled');
 			case 'delete':
 				console.log('[File Tree Context] Delete:', itemPath);
 				const fileName = itemPath.split('/').pop();
-				if (confirm(`Delete "${fileName}"? This action cannot be undone.`)) {
-					if (window.bridge && window.bridge.deleteFile) {
-						window.bridge.deleteFile(itemPath).then(() => {
+				showConfirmDialog(`Delete "${fileName}"? This action cannot be undone.`).then(confirmed => {
+					if (confirmed && window.bridge && window.bridge.deletePath) {
+						window.bridge.deletePath({ target: itemPath }).then(() => {
 							console.log('Deleted:', itemPath);
 						}).catch(err => {
 							console.error('Delete failed:', err);
 							alert('Failed to delete: ' + err.message);
 						});
 					}
-				}
+				});
 				break;
 				
 			default:
@@ -4296,20 +4911,37 @@ console.log('✨ Tab context menu document delegation enabled');
 		
 		searchPanel = document.createElement('div');
 		searchPanel.id = 'searchPanel';
-		searchPanel.className = 'search-panel hidden';
+		searchPanel.className = 'modal hidden';
+		searchPanel.setAttribute('role', 'dialog');
+		searchPanel.setAttribute('aria-modal', 'true');
 		searchPanel.innerHTML = `
-			<div class="search-header">
-				<input type="text" id="searchQuery" placeholder="Search in files..." />
-				<label><input type="checkbox" id="searchRegex" /> Regex</label>
-				<label><input type="checkbox" id="searchCase" /> Match Case</label>
-				<button id="searchClose">✕</button>
+			<div class="modal-backdrop"></div>
+			<div class="modal-card">
+				<div class="modal-header"><h3>Search in Files</h3></div>
+				<div class="modal-body">
+					<div class="search-panel">
+						<div class="search-header">
+							<input type="text" id="searchQuery" placeholder="Search in files..." />
+							<label><input type="checkbox" id="searchRegex" /> Regex</label>
+							<label><input type="checkbox" id="searchCase" /> Match Case</label>
+							<button id="searchClose" title="Close">✕</button>
+						</div>
+						<div class="search-results" id="searchResults"></div>
+					</div>
+				</div>
 			</div>
-			<div class="search-results" id="searchResults"></div>
 		`;
 		document.body.appendChild(searchPanel);
-		
-		document.getElementById('searchQuery').addEventListener('input', function() { clearTimeout(window._searchTimeout); window._searchTimeout = setTimeout(window.performSearch, 300); });
-		document.getElementById('searchClose').addEventListener('click', hideSearch);
+
+		// Wire up events
+		const queryEl = searchPanel.querySelector('#searchQuery');
+		const closeEl = searchPanel.querySelector('#searchClose');
+		// Use debounced search for better performance
+		const debouncedSearch = debounce(() => {
+			if (window.performSearch) window.performSearch();
+		}, 300);
+		if (queryEl) queryEl.addEventListener('input', debouncedSearch);
+		if (closeEl) closeEl.addEventListener('click', hideSearch);
 	}
 	
 	
@@ -4327,7 +4959,7 @@ console.log('✨ Tab context menu document delegation enabled');
 	function showSearch() {
 		createSearchPanel();
 		searchPanel.classList.remove('hidden');
-		document.getElementById('searchQuery').focus();
+		try { searchPanel.querySelector('#searchQuery')?.focus(); } catch {}
 	}
 	
 	function hideSearch() {
@@ -4424,23 +5056,79 @@ window.performSearch = async function() {
 };
 console.log('✨ Multi-file search ready');
 
-// Add zen mode debugging
-window.addEventListener('keydown', (e) => {
-if (e.ctrlKey && e.key === 'k') {
-sole.log('Ctrl+K detected');
+// Custom prompt dialog for Electron
+function showPromptDialog(message, defaultValue = '') {
+	return new Promise((resolve) => {
+		const overlay = document.createElement('div');
+		overlay.className = 'prompt-overlay';
+		overlay.innerHTML = `
+			<div class="prompt-dialog">
+				<div class="prompt-message">${message}</div>
+				<input type="text" class="prompt-input" value="${defaultValue}" />
+				<div class="prompt-buttons">
+					<button class="prompt-cancel">Cancel</button>
+					<button class="prompt-ok">OK</button>
+				</div>
+			</div>
+		`;
+		document.body.appendChild(overlay);
+		
+		const input = overlay.querySelector('.prompt-input');
+		const okBtn = overlay.querySelector('.prompt-ok');
+		const cancelBtn = overlay.querySelector('.prompt-cancel');
+		
+		input.focus();
+		input.select();
+		
+		const cleanup = (value) => {
+			document.body.removeChild(overlay);
+			resolve(value);
+		};
+		
+		okBtn.onclick = () => cleanup(input.value);
+		cancelBtn.onclick = () => cleanup(null);
+		input.onkeydown = (e) => {
+			if (e.key === 'Enter') cleanup(input.value);
+			if (e.key === 'Escape') cleanup(null);
+		};
+	});
 }
-});
 
-// Override toggleZenMode with debugging
-const originalToggleZen = window.toggleZenMode;
-window.toggleZenMode = function() {
-console.log('toggleZenMode called');
-if (originalToggleZen) originalToggleZen();
-const isZen = document.body.classList.contains('zen-mode');
-console.log('Zen mode is now:', isZen);
-console.log('Editor element:', document.getElementById('editor'));
-console.log('Topbar element:', document.querySelector('.topbar'));
-console.log('Tabs element:', document.querySelector('.tabs'));
-};
+window.showPromptDialog = showPromptDialog;
 
-console.log('✨ Zen mode debugging enabled');
+
+// Custom confirm dialog for Electron  
+function showConfirmDialog(message) {
+	return new Promise((resolve) => {
+		const overlay = document.createElement('div');
+		overlay.className = 'prompt-overlay';
+		overlay.innerHTML = `
+			<div class="prompt-dialog">
+				<div class="prompt-message">${message}</div>
+				<div class="prompt-buttons">
+					<button class="prompt-cancel">Cancel</button>
+					<button class="prompt-ok danger">Delete</button>
+				</div>
+			</div>
+		`;
+		document.body.appendChild(overlay);
+		
+		const okBtn = overlay.querySelector('.prompt-ok');
+		const cancelBtn = overlay.querySelector('.prompt-cancel');
+		
+		const cleanup = (value) => {
+			document.body.removeChild(overlay);
+			resolve(value);
+		};
+		
+		okBtn.onclick = () => cleanup(true);
+		cancelBtn.onclick = () => cleanup(false);
+		overlay.onkeydown = (e) => {
+			if (e.key === 'Escape') cleanup(false);
+		};
+		
+		cancelBtn.focus();
+	});
+}
+
+window.showConfirmDialog = showConfirmDialog;

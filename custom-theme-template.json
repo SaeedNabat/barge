@@ -1,0 +1,39 @@
+{
+  "name": "My Custom Theme",
+  "type": "dark",
+  "colors": {
+    "bg-primary": "#0f1419",
+    "bg-secondary": "#1a1e2e",
+    "bg-tertiary": "#13161f",
+    "text-primary": "#e0e7ff",
+    "text-secondary": "#9aa4b2",
+    "accent-color": "#6366f1",
+    "border-color": "rgba(255, 255, 255, 0.1)",
+    "editor": {
+      "background": "#0f1419",
+      "foreground": "#e0e7ff",
+      "lineHighlight": "rgba(99, 102, 241, 0.05)",
+      "selection": "rgba(99, 102, 241, 0.2)",
+      "cursor": "#6366f1"
+    },
+    "syntax": {
+      "keyword": "#c792ea",
+      "string": "#a5d6ff",
+      "comment": "#6272a4",
+      "function": "#82aaff",
+      "variable": "#f8f8f2",
+      "number": "#f78c6c",
+      "operator": "#89ddff"
+    }
+  },
+  "instructions": {
+    "usage": "Import this file via Edit → Preferences → Import Custom Theme",
+    "note": "Custom theme support is experimental. Modify the colors object to create your own theme.",
+    "bgPrimary": "Main background color",
+    "bgSecondary": "Secondary background (sidebar, panels)",
+    "bgTertiary": "Tertiary background (darker elements)",
+    "textPrimary": "Main text color",
+    "textSecondary": "Secondary text (labels, hints)",
+    "accentColor": "Accent color for highlights and buttons"
+  }
+}
