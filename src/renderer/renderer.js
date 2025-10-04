@@ -1833,9 +1833,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 		// Add missing functions for file tree and editor functionality
 		function iconSvg(kind, filename = '') {
-			// Modern folder icon with outline style
+			// Modern folder icon - always visible
 			if (kind === 'dir') {
-				return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" fill="#60a5fa" opacity="0.9"/><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" stroke="#3b82f6" stroke-width="1.5" fill="none"/></svg>';
+				return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" fill="#60a5fa"/><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" stroke="#3b82f6" stroke-width="1.5" fill="none"/></svg>';
 			}
 			
 			// Get file extension for color coding
@@ -1867,9 +1867,9 @@ document.addEventListener('DOMContentLoaded', () => {
 			
 			const color = iconColors[ext] || '#94a3b8';
 			
-			// Modern file icon with outline and colored fill
+			// Modern file icon - always visible, no opacity attribute
 			return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-				<path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z" fill="${color}" opacity="0.15"/>
+				<path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z" fill="${color}"/>
 				<path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z" stroke="${color}" stroke-width="1.5"/>
 				<path d="M14 2v6h6" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
 			</svg>`;
@@ -1885,10 +1885,13 @@ document.addEventListener('DOMContentLoaded', () => {
 				const ext = node.name.split('.').pop()?.toLowerCase();
 				if (ext) el.dataset.ext = ext;
 			}
-			el.innerHTML = `<span class="label">${node.name}</span>`;
+			
+			// Add icon + label with proper visibility
+			const icon = iconSvg(node.type, node.name);
+			el.innerHTML = `${icon}<span class="label">${node.name}</span>`;
 			el.draggable = true;
+			
 			if (node.type === 'dir') {
-				el.innerHTML = `<span class="label">${node.name}</span>`;
 				// Check if folder has children
 				const hasKids = (Array.isArray(node.children) && node.children.length > 0) || !!node.hasChildren;
 				let caret = null;
@@ -1964,12 +1967,28 @@ document.addEventListener('DOMContentLoaded', () => {
 			scrollTop: 0
 		};
 
+		// Initialize all folders to be collapsed by default
+		function initializeTreeState(nodes) {
+			for (const node of nodes) {
+				if (node.type === 'dir') {
+					// Set collapsed to true if not already set (folders start closed)
+					if (node.collapsed === undefined) {
+						node.collapsed = true;
+					}
+					// Recursively initialize children
+					if (node.children && node.children.length > 0) {
+						initializeTreeState(node.children);
+					}
+				}
+			}
+		}
+
 		// Flatten tree structure for virtual scrolling
 		function flattenTree(nodes, level = 0, result = [], parentExpanded = true) {
 			for (const node of nodes) {
 				result.push({ node, level, isVisible: parentExpanded });
 				if (node.type === 'dir' && node.children && node.children.length > 0) {
-					const isExpanded = !node.collapsed; // Check if this folder is expanded
+					const isExpanded = !node.collapsed;
 					flattenTree(node.children, level + 1, result, parentExpanded && isExpanded);
 				}
 			}
@@ -1979,6 +1998,9 @@ document.addEventListener('DOMContentLoaded', () => {
 		function renderTree(root, tree) {
 			const fileTreeEl = document.getElementById('fileTree');
 			fileTreeEl.innerHTML = '';
+			
+			// Initialize tree state - collapse all folders by default
+			initializeTreeState(tree);
 			
 			// Store tree globally for re-flattening
 			window.__currentTree__ = tree;
@@ -1990,20 +2012,24 @@ document.addEventListener('DOMContentLoaded', () => {
 			wrapper.style.overflow = 'auto';
 			wrapper.style.height = '100%';
 			
-			// Create viewport container
-			const viewport = document.createElement('div');
-			viewport.className = 'tree-viewport';
-			viewport.style.position = 'relative';
-			
-			// Create root element
+			// Create root element separately (not in virtual scroll)
 			const rootEl = document.createElement('div'); 
-			rootEl.className = 'item'; 
+			rootEl.className = 'item root-folder'; 
 			rootEl.textContent = root; 
-			viewport.appendChild(rootEl);
+			rootEl.style.position = 'sticky';
+			rootEl.style.top = '0';
+			rootEl.style.zIndex = '10';
+			rootEl.style.padding = '6px 12px';
+			wrapper.appendChild(rootEl);
 			rootEl.addEventListener('click', () => { 
 				selectedDirectoryPath = root; 
 				highlightSelectedDir(rootEl); 
 			});
+			
+			// Create viewport container
+			const viewport = document.createElement('div');
+			viewport.className = 'tree-viewport';
+			viewport.style.position = 'relative';
 			
 			// Flatten tree for virtual scrolling
 			flattenedTree = flattenTree(tree);
@@ -2075,17 +2101,21 @@ document.addEventListener('DOMContentLoaded', () => {
 				if (ext) el.dataset.ext = ext;
 			}
 			
-			el.innerHTML = `<span class="label">${node.name}</span>`;
+			// Add icon + label with proper visibility
+			const icon = iconSvg(node.type, node.name);
+			el.innerHTML = `${icon}<span class="label">${node.name}</span>`;
 			
 			if (node.type === 'dir') {
 				const hasKids = (Array.isArray(node.children) && node.children.length > 0) || !!node.hasChildren;
 				if (hasKids) {
 					el.classList.add('has-children');
-					if (node.collapsed !== false) el.classList.add('collapsed');
+					// Add collapsed class only if explicitly collapsed
+					if (node.collapsed === true) el.classList.add('collapsed');
 					
 					const caret = document.createElement('span');
 					caret.className = 'caret';
-					if (!node.collapsed) caret.classList.add('open');
+					// Show caret as open by default (unless explicitly collapsed)
+					if (node.collapsed !== true) caret.classList.add('open');
 					caret.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
 					el.appendChild(caret);
 					
